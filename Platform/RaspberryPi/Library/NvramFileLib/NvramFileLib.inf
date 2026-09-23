@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+[Defines]
+  INF_VERSION = 0x0001001A
+  BASE_NAME = NvramFileLib
+  FILE_GUID = b9f63d30-b7d2-47a0-a90b-df18aa8e604b
+  MODULE_TYPE = BASE
+  VERSION_STRING = 1.0
+  LIBRARY_CLASS = NvramFileLib
+[Sources]
+  NvramFileLib.c
+[Packages]
+  MdePkg/MdePkg.dec
+  Platform/RaspberryPi/RaspberryPi.dec

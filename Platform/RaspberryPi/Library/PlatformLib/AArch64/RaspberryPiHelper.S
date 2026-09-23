@@ -9,9 +9,10 @@
  *
  **/
 
-#include <AsmMacroLib.h>
+#include <AsmMacroIoLibV8.h>
 #include <Library/ArmLib.h>
 #include <IndustryStandard/Bcm2836.h>
+#include <IndustryStandard/Bcm2836Mbox.h>
 #include <IndustryStandard/RpiMbox.h>
 
     .macro  drain
@@ -145,5 +146,32 @@ ASM_FUNC (ArmPlatformPeiBootAction)
     .long   0                           // frequency
     .long   0                           // end tag
     .set    .Lclkinfo_size, . - .Lclkinfo_buffer
+
+//UINTN
+//ArmPlatformGetPrimaryCoreMpId (
+//  VOID
+//  );
+ASM_FUNC (ArmPlatformGetPrimaryCoreMpId)
+    MOV32  (w0, FixedPcdGet32 (PcdArmPrimaryCore))
+    ret
+
+//UINTN
+//ArmPlatformIsPrimaryCore (
+//  IN UINTN MpId
+//  );
+ASM_FUNC (ArmPlatformIsPrimaryCore)
+    mov   x0, #1
+    ret
+
+//UINTN
+//ArmPlatformGetCorePosition (
+//  IN UINTN MpId
+//  );
+// With this function: CorePos = (ClusterId * 4) + CoreId
+ASM_FUNC (ArmPlatformGetCorePosition)
+    and   x1, x0, #ARM_CORE_MASK
+    and   x0, x0, #ARM_CLUSTER_MASK
+    add   x0, x1, x0, LSR #6
+    ret
 
 ASM_FUNCTION_REMOVE_IF_UNREFERENCED

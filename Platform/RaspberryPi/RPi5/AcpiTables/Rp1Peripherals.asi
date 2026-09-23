@@ -1,0 +1,344 @@
+/** @file
+ *
+ *  Enumeration descriptions for Raspberry Pi 5.
+ *  Register maps: Raspberry Pi downstream Linux bcm2712*.dtsi and rp1.dtsi.
+ *
+ *  SPDX-License-Identifier: BSD-2-Clause-Patent
+ *
+ **/
+
+// Included inside \\_SB.RP1B after Rp1.asi.
+// The parent owns the firmware-assigned BAR and hides its children if absent.
+// Local RP1 interrupt numbers are NOT GIC GSIs: all children use PINT (261).
+// Only USB interrupt forwarding is enabled by firmware. A future RP1-aware
+// driver must configure/demultiplex its local sources; enumeration does no I/O.
+// CSI/DSI and DPI/VEC share configuration registers and are grouped accordingly.
+
+#define RP1_DEVICE_INFO(Hid, Uid, Description)                 \
+  Name (_HID, Hid)                                              \
+  Name (_UID, Uid)                                              \
+  Name (_DDN, Description)                                     \
+  Name (_CCA, 0)                                               \
+  Method (_STA, 0, NotSerialized) {                            \
+    Return (\_SB.RP1B._STA ())                                \
+  }
+
+#define RP1_DEVICE_IRQ(Irq)                                    \
+  Name (_DSD, Package () {                                      \
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),             \
+    Package () {                                               \
+      Package () { "raspberrypi,rp1-interrupts", Package () { Irq } } \
+    }                                                          \
+  })
+
+#define RP1_SIMPLE_DEVICE(Dev, Hid, Uid, Description, Offset, Length, Irq) \
+  Device (Dev) {                                               \
+    RP1_DEVICE_INFO (Hid, Uid, Description)                     \
+    Method (_CRS, 0, Serialized) {                             \
+      Name (RBUF, ResourceTemplate () {                       \
+        RP1_QWORDMEMORY_BUF (00)                              \
+        RP1_INTERRUPT_BUF (99)                                \
+      })                                                       \
+      RP1_QWORDMEMORY_SET (00, Offset, Length)                 \
+      RP1_INTERRUPT_SET (99)                                  \
+      Return (RBUF)                                            \
+    }                                                          \
+    RP1_DEVICE_IRQ (Irq)                                      \
+  }
+
+Device (ETH0) {
+  RP1_DEVICE_INFO ("RPI0001", 0x0, "RP1 Gigabit Ethernet (Cadence GEM)")
+  Name (_CLS, Package () { 0x02, 0x00, 0x00 })
+
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      RP1_QWORDMEMORY_BUF (00)
+      RP1_INTERRUPT_BUF (99)
+    })
+    RP1_QWORDMEMORY_SET (00, RP1_ETH_BASE, 0x4000)
+    RP1_INTERRUPT_SET (99)
+    Return (RBUF)
+  }
+
+  RP1_DEVICE_IRQ (0x6)
+}
+
+Device (GPI0) {
+  RP1_DEVICE_INFO ("RPI0002", 0x0, "RP1 GPIO and pin control")
+
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      RP1_QWORDMEMORY_BUF (00)
+      RP1_QWORDMEMORY_BUF (01)
+      RP1_QWORDMEMORY_BUF (02)
+      RP1_INTERRUPT_BUF (99)
+    })
+    RP1_QWORDMEMORY_SET (00, RP1_IO_BANK0_BASE, 0xC000)
+    RP1_QWORDMEMORY_SET (01, RP1_SYS_RIO0_BASE, 0xC000)
+    RP1_QWORDMEMORY_SET (02, RP1_PADS_BANK0_BASE, 0xC000)
+    RP1_INTERRUPT_SET (99)
+    Return (RBUF)
+  }
+
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      Package () { "raspberrypi,rp1-interrupts", Package () { 0x0, 0x1, 0x2 } }
+    }
+  })
+}
+
+Device (CLK0) {
+  RP1_DEVICE_INFO ("RPI0003", 0x0, "RP1 clocks and PLLs")
+
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      RP1_QWORDMEMORY_BUF (00)
+    })
+    RP1_QWORDMEMORY_SET (00, RP1_CLOCKS_MAIN_BASE, 0x10038)
+    Return (RBUF)
+  }
+}
+
+RP1_SIMPLE_DEVICE (DMA0, "RPI0004", 0x0,
+  "RP1 AXI DMA controller", RP1_DMA_BASE, 0x1000, 0x28)
+
+RP1_SIMPLE_DEVICE (I2C0, "RPI0005", 0x0,
+  "RP1 I2C controller 0", RP1_I2C0_BASE, 0x1000, 0x7)
+
+RP1_SIMPLE_DEVICE (I2C1, "RPI0005", 0x1,
+  "RP1 I2C controller 1", RP1_I2C1_BASE, 0x1000, 0x8)
+
+RP1_SIMPLE_DEVICE (I2C2, "RPI0005", 0x2,
+  "RP1 I2C controller 2", RP1_I2C2_BASE, 0x1000, 0x9)
+
+RP1_SIMPLE_DEVICE (I2C3, "RPI0005", 0x3,
+  "RP1 I2C controller 3", RP1_I2C3_BASE, 0x1000, 0xA)
+
+RP1_SIMPLE_DEVICE (I2C4, "RPI0005", 0x4,
+  "RP1 I2C controller 4", RP1_I2C4_BASE, 0x1000, 0xB)
+
+RP1_SIMPLE_DEVICE (I2C5, "RPI0005", 0x5,
+  "RP1 I2C controller 5", RP1_I2C5_BASE, 0x1000, 0xC)
+
+RP1_SIMPLE_DEVICE (I2C6, "RPI0005", 0x6,
+  "RP1 I2C controller 6", RP1_I2C6_BASE, 0x1000, 0xD)
+
+RP1_SIMPLE_DEVICE (SPI0, "RPI0006", 0x0,
+  "RP1 SPI controller 0", RP1_SPI0_BASE, 0x130, 0x13)
+
+RP1_SIMPLE_DEVICE (SPI1, "RPI0006", 0x1,
+  "RP1 SPI controller 1", RP1_SPI1_BASE, 0x130, 0x14)
+
+RP1_SIMPLE_DEVICE (SPI2, "RPI0006", 0x2,
+  "RP1 SPI controller 2", RP1_SPI2_BASE, 0x130, 0x15)
+
+RP1_SIMPLE_DEVICE (SPI3, "RPI0006", 0x3,
+  "RP1 SPI controller 3", RP1_SPI3_BASE, 0x130, 0x16)
+
+RP1_SIMPLE_DEVICE (SPI4, "RPI0006", 0x4,
+  "RP1 SPI target 4", RP1_SPI4_BASE, 0x130, 0x17)
+
+RP1_SIMPLE_DEVICE (SPI5, "RPI0006", 0x5,
+  "RP1 SPI controller 5", RP1_SPI5_BASE, 0x130, 0x18)
+
+RP1_SIMPLE_DEVICE (SPI6, "RPI0006", 0x6,
+  "RP1 SPI controller 6", RP1_SPI6_BASE, 0x130, 0x36)
+
+RP1_SIMPLE_DEVICE (SPI7, "RPI0006", 0x7,
+  "RP1 SPI target 7", RP1_SPI7_BASE, 0x130, 0x37)
+
+RP1_SIMPLE_DEVICE (SPI8, "RPI0006", 0x8,
+  "RP1 SPI controller 8", RP1_SPI8_BASE, 0x130, 0x38)
+
+RP1_SIMPLE_DEVICE (URT0, "RPI0007", 0x0,
+  "RP1 UART 0", RP1_UART0_BASE, 0x100, 0x19)
+
+RP1_SIMPLE_DEVICE (URT1, "RPI0007", 0x1,
+  "RP1 UART 1", RP1_UART1_BASE, 0x100, 0x2A)
+
+RP1_SIMPLE_DEVICE (URT2, "RPI0007", 0x2,
+  "RP1 UART 2", RP1_UART2_BASE, 0x100, 0x2B)
+
+RP1_SIMPLE_DEVICE (URT3, "RPI0007", 0x3,
+  "RP1 UART 3", RP1_UART3_BASE, 0x100, 0x2C)
+
+RP1_SIMPLE_DEVICE (URT4, "RPI0007", 0x4,
+  "RP1 UART 4", RP1_UART4_BASE, 0x100, 0x2D)
+
+RP1_SIMPLE_DEVICE (URT5, "RPI0007", 0x5,
+  "RP1 UART 5", RP1_UART5_BASE, 0x100, 0x2E)
+
+RP1_SIMPLE_DEVICE (PWM0, "RPI0008", 0x0,
+  "RP1 PWM 0", RP1_PWM0_BASE, 0x100, 0x5)
+
+Device (PWM1) {
+  RP1_DEVICE_INFO ("RPI0008", 0x1, "RP1 PWM 1 (fan connector)")
+  // Patched only after the board policy detected and initialized the fan.
+  // Preserve the generic PWM identity and resources. The compatible identity
+  // contracts GPIO45, channel 3, inverted mark/space, 50 MHz / 2078 ticks.
+  Name (FNRD, 0xFF)
+  Method (_CID, 0, NotSerialized) {
+    If (FNRD == 1) { Return ("RPI00F1") }
+    // Keep a valid ID in the no-handoff case. The initial Windows trial with
+    // an empty _CID fallback stopped with ACPI_BIOS_ERROR.
+    Return ("RPI0008")
+  }
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      RP1_QWORDMEMORY_BUF (00)
+      RP1_INTERRUPT_BUF (99)
+    })
+    RP1_QWORDMEMORY_SET (00, RP1_PWM1_BASE, 0x100)
+    RP1_INTERRUPT_SET (99)
+    Return (RBUF)
+  }
+  RP1_DEVICE_IRQ (0x29)
+}
+
+RP1_SIMPLE_DEVICE (I2S0, "RPI0009", 0x0,
+  "RP1 I2S audio 0", RP1_I2S0_BASE, 0x1000, 0xE)
+
+RP1_SIMPLE_DEVICE (I2S1, "RPI0009", 0x1,
+  "RP1 I2S audio 1", RP1_I2S1_BASE, 0x1000, 0xF)
+
+RP1_SIMPLE_DEVICE (I2S2, "RPI0009", 0x2,
+  "RP1 I2S audio 2", RP1_I2S2_BASE, 0x1000, 0x10)
+
+RP1_SIMPLE_DEVICE (AUD0, "RPI000A", 0x0,
+  "RP1 audio output", RP1_AUDIO_OUT_BASE, 0x4000, 0x4)
+
+RP1_SIMPLE_DEVICE (ADC0, "RPI000B", 0x0,
+  "RP1 analogue to digital converter", RP1_ADC_BASE, 0x4000, 0x34)
+
+Device (SDI0) {
+  RP1_DEVICE_INFO ("RPI000C", 0x0, "RP1 SDIO controller 0")
+
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      RP1_QWORDMEMORY_BUF (00)
+      RP1_QWORDMEMORY_BUF (01)
+      RP1_INTERRUPT_BUF (99)
+    })
+    RP1_QWORDMEMORY_SET (00, RP1_SDIO0_BASE, 0x100)
+    RP1_QWORDMEMORY_SET (01, RP1_SDIO0_CFG_BASE + 4, 0x1C)
+    RP1_INTERRUPT_SET (99)
+    Return (RBUF)
+  }
+
+  RP1_DEVICE_IRQ (0x11)
+}
+
+Device (SDI1) {
+  RP1_DEVICE_INFO ("RPI000C", 0x1, "RP1 SDIO controller 1")
+
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      RP1_QWORDMEMORY_BUF (00)
+      RP1_QWORDMEMORY_BUF (01)
+      RP1_INTERRUPT_BUF (99)
+    })
+    RP1_QWORDMEMORY_SET (00, RP1_SDIO1_BASE, 0x100)
+    RP1_QWORDMEMORY_SET (01, RP1_SDIO1_CFG_BASE + 4, 0x1C)
+    RP1_INTERRUPT_SET (99)
+    Return (RBUF)
+  }
+
+  RP1_DEVICE_IRQ (0x12)
+}
+
+Device (MIP0) {
+  RP1_DEVICE_INFO ("RPI000D", 0x0, "RP1 MIPI 0 CSI/DSI and camera front end")
+
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      RP1_QWORDMEMORY_BUF (00)
+      RP1_QWORDMEMORY_BUF (01)
+      RP1_QWORDMEMORY_BUF (02)
+      RP1_QWORDMEMORY_BUF (03)
+      RP1_QWORDMEMORY_BUF (04)
+      RP1_QWORDMEMORY_BUF (05)
+      RP1_INTERRUPT_BUF (99)
+    })
+    RP1_QWORDMEMORY_SET (00, RP1_MIPI0_CSIDMA_BASE, 0x100)
+    RP1_QWORDMEMORY_SET (01, RP1_MIPI0_CSIHOST_BASE, 0x100)
+    RP1_QWORDMEMORY_SET (02, RP1_MIPI0_DSIDMA_BASE, 0x1000)
+    RP1_QWORDMEMORY_SET (03, RP1_MIPI0_DSIHOST_BASE, 0x1000)
+    RP1_QWORDMEMORY_SET (04, RP1_MIPI0_CFG_BASE, 0x1000)
+    RP1_QWORDMEMORY_SET (05, RP1_MIPI0_ISP_BASE, 0x1000)
+    RP1_INTERRUPT_SET (99)
+    Return (RBUF)
+  }
+
+  RP1_DEVICE_IRQ (0x2F)
+}
+
+Device (MIP1) {
+  RP1_DEVICE_INFO ("RPI000D", 0x1, "RP1 MIPI 1 CSI/DSI and camera front end")
+
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      RP1_QWORDMEMORY_BUF (00)
+      RP1_QWORDMEMORY_BUF (01)
+      RP1_QWORDMEMORY_BUF (02)
+      RP1_QWORDMEMORY_BUF (03)
+      RP1_QWORDMEMORY_BUF (04)
+      RP1_QWORDMEMORY_BUF (05)
+      RP1_INTERRUPT_BUF (99)
+    })
+    RP1_QWORDMEMORY_SET (00, RP1_MIPI1_CSIDMA_BASE, 0x100)
+    RP1_QWORDMEMORY_SET (01, RP1_MIPI1_CSIHOST_BASE, 0x100)
+    RP1_QWORDMEMORY_SET (02, RP1_MIPI1_DSIDMA_BASE, 0x1000)
+    RP1_QWORDMEMORY_SET (03, RP1_MIPI1_DSIHOST_BASE, 0x1000)
+    RP1_QWORDMEMORY_SET (04, RP1_MIPI1_CFG_BASE, 0x1000)
+    RP1_QWORDMEMORY_SET (05, RP1_MIPI1_ISP_BASE, 0x1000)
+    RP1_INTERRUPT_SET (99)
+    Return (RBUF)
+  }
+
+  RP1_DEVICE_IRQ (0x30)
+}
+
+Device (VID0) {
+  RP1_DEVICE_INFO ("RPI000E", 0x0, "RP1 DPI and composite video output")
+
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      RP1_QWORDMEMORY_BUF (00)
+      RP1_QWORDMEMORY_BUF (01)
+      RP1_QWORDMEMORY_BUF (02)
+      RP1_INTERRUPT_BUF (99)
+    })
+    RP1_QWORDMEMORY_SET (00, RP1_VIDEO_OUT_CFG_BASE, 0x1000)
+    RP1_QWORDMEMORY_SET (01, RP1_VIDEO_OUT_VEC_BASE, 0x1000)
+    RP1_QWORDMEMORY_SET (02, RP1_VIDEO_OUT_DPI_BASE, 0x1000)
+    RP1_INTERRUPT_SET (99)
+    Return (RBUF)
+  }
+
+  RP1_DEVICE_IRQ (0x31)
+}
+
+Device (PIO0) {
+  RP1_DEVICE_INFO ("RPI000F", 0x0, "RP1 programmable I/O")
+
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      RP1_QWORDMEMORY_BUF (00)
+      RP1_INTERRUPT_BUF (99)
+    })
+    RP1_QWORDMEMORY_SET (00, RP1_PIO_BASE, 0x20)
+    RP1_INTERRUPT_SET (99)
+    Return (RBUF)
+  }
+
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      Package () { "raspberrypi,rp1-interrupts", Package () { 0x32, 0x33 } }
+    }
+  })
+}
+
+RP1_SIMPLE_DEVICE (MBX1, "RPI0010", 0x0,
+  "RP1 firmware mailbox", RP1_SYSCFG_BASE, 0x4000, 0x3A)

@@ -19,6 +19,7 @@
 #include <Library/UefiBootServicesTableLib.h>
 
 #include "VarBlockService.h"
+#include "FileNvram.h"
 
 #define EFI_FVB2_STATUS \
           (EFI_FVB2_READ_STATUS | EFI_FVB2_WRITE_STATUS | EFI_FVB2_LOCK_STATUS)
@@ -93,7 +94,13 @@ VarStoreWrite (
   IN     UINT8 *Buffer
   )
 {
+  if (NumBytes == NULL || Buffer == NULL || Address < mFvInstance->FvBase ||
+      *NumBytes > mFvInstance->FvLength ||
+      Address - mFvInstance->FvBase > mFvInstance->FvLength - *NumBytes) {
+    return EFI_INVALID_PARAMETER;
+  }
   CopyMem ((VOID*)Address, Buffer, *NumBytes);
+  if (FeaturePcdGet (PcdNvramFileEnable)) FileNvramChanged ();
   mFvInstance->Dirty = TRUE;
 
   return EFI_SUCCESS;
@@ -106,7 +113,12 @@ VarStoreErase (
   IN UINTN LbaLength
   )
 {
+  if (Address < mFvInstance->FvBase || LbaLength > mFvInstance->FvLength ||
+      Address - mFvInstance->FvBase > mFvInstance->FvLength - LbaLength) {
+    return EFI_INVALID_PARAMETER;
+  }
   SetMem ((VOID*)Address, LbaLength, 0xff);
+  if (FeaturePcdGet (PcdNvramFileEnable)) FileNvramChanged ();
   mFvInstance->Dirty = TRUE;
 
   return EFI_SUCCESS;
@@ -118,7 +130,8 @@ FvbGetVolumeAttributes (
   OUT EFI_FVB_ATTRIBUTES_2 *Attributes
   )
 {
-  *Attributes = mFvInstance->VolumeHeader->Attributes;
+  if (Attributes == NULL) return EFI_INVALID_PARAMETER;
+  *Attributes = mFvInstance->Attributes;
   return EFI_SUCCESS;
 }
 
@@ -151,54 +164,18 @@ FvbGetLbaAddress (
 
 --*/
 {
-  UINT32 NumBlocks;
-  UINT32 BlockLength;
   UINTN Offset;
-  EFI_LBA StartLba;
-  EFI_LBA NextLba;
-  EFI_FV_BLOCK_MAP_ENTRY *BlockMap;
-
-  StartLba = 0;
-  Offset = 0;
-  BlockMap = &(mFvInstance->VolumeHeader->BlockMap[0]);
-
-  //
-  // Parse the blockmap of the FV to find which map entry the Lba belongs to.
-  //
-  while (TRUE) {
-    NumBlocks = BlockMap->NumBlocks;
-    BlockLength = BlockMap->Length;
-
-    if (NumBlocks == 0 || BlockLength == 0) {
-      return EFI_INVALID_PARAMETER;
-    }
-
-    NextLba = StartLba + NumBlocks;
-
-    //
-    // The map entry found.
-    //
-    if (Lba >= StartLba && Lba < NextLba) {
-      Offset = Offset + (UINTN)MultU64x32 ((Lba - StartLba), BlockLength);
-      if (LbaAddress != NULL) {
-        *LbaAddress = mFvInstance->FvBase + Offset;
-      }
-
-      if (LbaLength != NULL) {
-        *LbaLength = BlockLength;
-      }
-
-      if (NumOfBlocks != NULL) {
-        *NumOfBlocks = (UINTN)(NextLba - Lba);
-      }
-
-      return EFI_SUCCESS;
-    }
-
-    StartLba = NextLba;
-    Offset = Offset + NumBlocks * BlockLength;
-    BlockMap++;
+  // This platform has one uniform block map, validated at initialization.
+  // Never read it from the live FV: block zero can be erased during FTW.
+  if (Lba >= mFvInstance->NumOfBlocks || mFvInstance->BlockSize == 0 ||
+      mFvInstance->NumOfBlocks != mFvInstance->FvLength / mFvInstance->BlockSize) {
+    return EFI_INVALID_PARAMETER;
   }
+  Offset = (UINTN)Lba * mFvInstance->BlockSize;
+  if (LbaAddress != NULL) *LbaAddress = mFvInstance->FvBase + Offset;
+  if (LbaLength != NULL) *LbaLength = mFvInstance->BlockSize;
+  if (NumOfBlocks != NULL) *NumOfBlocks = mFvInstance->NumOfBlocks - (UINTN)Lba;
+  return EFI_SUCCESS;
 }
 
 
@@ -282,8 +259,8 @@ FvbSetVolumeAttributes (
   UINT32 NewStatus;
   EFI_FVB_ATTRIBUTES_2 UnchangedAttributes;
 
-  AttribPtr =
-    (EFI_FVB_ATTRIBUTES_2*) &(mFvInstance->VolumeHeader->Attributes);
+  if (Attributes == NULL) return EFI_INVALID_PARAMETER;
+  AttribPtr = &mFvInstance->Attributes;
   OldAttributes = *AttribPtr;
   Capabilities = OldAttributes & (EFI_FVB2_READ_DISABLED_CAP | \
                                   EFI_FVB2_READ_ENABLED_CAP |    \
@@ -522,7 +499,8 @@ FvbProtocolEraseBlocks (
 
     NumOfLba = VA_ARG (args, UINTN);
 
-    if ((NumOfLba == 0) || ((StartingLba + NumOfLba) > NumOfBlocks)) {
+    if ((NumOfLba == 0) || (StartingLba >= NumOfBlocks) ||
+        (NumOfLba > NumOfBlocks - StartingLba)) {
       VA_END (args);
       return EFI_INVALID_PARAMETER;
     }
@@ -637,8 +615,8 @@ FvbProtocolWrite (
     return EFI_INVALID_PARAMETER;
   }
 
-  if (LbaLength < (*NumBytes + Offset)) {
-    *NumBytes = (UINT32)(LbaLength - Offset);
+  if (*NumBytes > LbaLength - Offset) {
+    *NumBytes = LbaLength - Offset;
     Status = EFI_BAD_BUFFER_SIZE;
   }
 
@@ -733,8 +711,8 @@ FvbProtocolRead (
     return EFI_INVALID_PARAMETER;
   }
 
-  if (LbaLength < (*NumBytes + Offset)) {
-    *NumBytes = (UINT32)(LbaLength - Offset);
+  if (*NumBytes > LbaLength - Offset) {
+    *NumBytes = LbaLength - Offset;
     Status = EFI_BAD_BUFFER_SIZE;
   }
 
@@ -773,7 +751,7 @@ ValidateFvHeader (
   if ((FwVolHeader->Revision != EFI_FVH_REVISION) ||
       (FwVolHeader->Signature != EFI_FVH_SIGNATURE) ||
       (FwVolHeader->FvLength == ((UINTN)-1)) ||
-      ((FwVolHeader->HeaderLength & 0x01) != 0)
+      (FwVolHeader->HeaderLength != sizeof (EFI_FIRMWARE_VOLUME_HEADER) + sizeof (EFI_FV_BLOCK_MAP_ENTRY))
       ) {
     return EFI_NOT_FOUND;
   }
@@ -817,12 +795,9 @@ FvbInitialize (
 {
   EFI_STATUS Status;
   UINT32 BufferSize;
-  EFI_FV_BLOCK_MAP_ENTRY *PtrBlockMapEntry;
   EFI_FW_VOL_BLOCK_DEVICE *FvbDevice;
-  UINT32 MaxLbaSize;
   EFI_PHYSICAL_ADDRESS BaseAddress;
   UINTN Length;
-  UINTN NumOfBlocks;
   RETURN_STATUS PcdStatus;
   UINTN StartOffset;
 
@@ -848,11 +823,16 @@ FvbInitialize (
    */
   mFvInstance->MappedFile = L"RPI_EFI.FD";
 
+  if (FeaturePcdGet (PcdNvramFileEnable)) FileNvramInitialize ();
+
   Status = ValidateFvHeader (mFvInstance->VolumeHeader);
   if (!EFI_ERROR (Status)) {
     if (mFvInstance->VolumeHeader->FvLength != Length ||
         mFvInstance->VolumeHeader->BlockMap[0].Length !=
-        PcdGet32 (PcdFirmwareBlockSize)) {
+        PcdGet32 (PcdFirmwareBlockSize) ||
+        mFvInstance->VolumeHeader->BlockMap[0].NumBlocks != Length / PcdGet32 (PcdFirmwareBlockSize) ||
+        mFvInstance->VolumeHeader->BlockMap[1].Length != 0 ||
+        mFvInstance->VolumeHeader->BlockMap[1].NumBlocks != 0) {
       Status = EFI_VOLUME_CORRUPTED;
     }
   }
@@ -887,25 +867,9 @@ FvbInitialize (
     ASSERT_EFI_ERROR (Status);
   }
 
-  MaxLbaSize = 0;
-  NumOfBlocks = 0;
-  for (PtrBlockMapEntry = mFvInstance->VolumeHeader->BlockMap;
-       PtrBlockMapEntry->NumBlocks != 0;
-       PtrBlockMapEntry++) {
-    //
-    // Get the maximum size of a block.
-    //
-    if (MaxLbaSize < PtrBlockMapEntry->Length) {
-      MaxLbaSize = PtrBlockMapEntry->Length;
-    }
-
-    NumOfBlocks = NumOfBlocks + PtrBlockMapEntry->NumBlocks;
-  }
-
-  //
-  // The total number of blocks in the FV.
-  //
-  mFvInstance->NumOfBlocks = NumOfBlocks;
+  mFvInstance->BlockSize = PcdGet32 (PcdFirmwareBlockSize);
+  mFvInstance->NumOfBlocks = Length / mFvInstance->BlockSize;
+  mFvInstance->Attributes = mFvInstance->VolumeHeader->Attributes;
 
   //
   // Add a FVB Protocol Instance

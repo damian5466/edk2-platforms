@@ -31,10 +31,11 @@
   VarBlockService.c
   VarBlockServiceDxe.c
   FileIo.c
+  FileNvram.c
+  FileNvram.h
 
 [Packages]
   ArmPkg/ArmPkg.dec
-  EmbeddedPkg/EmbeddedPkg.dec
   MdePkg/MdePkg.dec
   MdeModulePkg/MdeModulePkg.dec
   Platform/RaspberryPi/RaspberryPi.dec
@@ -46,23 +47,27 @@
   DevicePathLib
   DxeServicesTableLib
   MemoryAllocationLib
+  HobLib
+  NvramFileLib
   PcdLib
   UefiBootServicesTableLib
   UefiDriverEntryPoint
   UefiRuntimeLib
+  UefiRuntimeServicesTableLib
 
 [Guids]
-  gEdkiiNvVarStoreFormattedGuid			## PRODUCES ## PROTOCOL
   gEfiEventVirtualAddressChangeGuid
+  gRaspberryPiEventResetGuid
   gEfiEventReadyToBootGuid
+  gRpiNvramFileGuid
 
 [Protocols]
   gEfiSimpleFileSystemProtocolGuid
   gEfiLoadedImageProtocolGuid
+  gEfiVariableArchProtocolGuid
   gEfiBlockIoProtocolGuid
   gEfiFirmwareVolumeBlockProtocolGuid           # PROTOCOL SOMETIMES_PRODUCED
   gEfiDevicePathProtocolGuid                    # PROTOCOL SOMETIMES_PRODUCED
-  gEfiResetNotificationProtocolGuid
 
 [FixedPcd]
   gEfiMdeModulePkgTokenSpaceGuid.PcdFlashNvStorageVariableSize
@@ -85,6 +90,7 @@
   gEfiMdeModulePkgTokenSpaceGuid.PcdFlashNvStorageVariableBase64
 
 [FeaturePcd]
+  gRaspberryPiTokenSpaceGuid.PcdNvramFileEnable
 
 [Depex]
-  gEfiResetNotificationProtocolGuid
+  TRUE

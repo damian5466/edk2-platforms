@@ -10,19 +10,24 @@
 
 #include <Library/BaseLib.h>
 #include <Library/BaseMemoryLib.h>
+#include <Library/BoardInfoLib.h>
+#include <Library/BoardRevisionHelperLib.h>
 #include <Library/DebugLib.h>
 #include <Library/DxeServicesLib.h>
-#include <Library/FdtLib.h>
+#include <Library/FdtPlatformLib.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiLib.h>
+#include <Library/FdtLib.h>
 #include <Protocol/RpiFirmware.h>
 #include <Guid/Fdt.h>
 #include <ConfigVars.h>
+#include "Rp1Fdt.h"
 
 STATIC VOID                             *mFdtImage;
 
 STATIC RASPBERRY_PI_FIRMWARE_PROTOCOL   *mFwProtocol;
+STATIC UINT32                           mBoardRevision;
 
 STATIC
 EFI_STATUS
@@ -188,7 +193,7 @@ AddUsbCompatibleProperty (
   NewList = AllocatePool (ListSize + sizeof (NewProp));
   if (NewList == NULL) {
     DEBUG ((DEBUG_ERROR, "%a: failed to allocate memory\n", __func__));
-    return EFI_OUT_OF_RESOURCES;;
+    return EFI_OUT_OF_RESOURCES;
   }
   CopyMem (NewList, List, ListSize);
   CopyMem (&NewList[ListSize], NewProp, sizeof (NewProp));
@@ -462,9 +467,15 @@ FdtDxeInitialize (
                   (VOID**)&mFwProtocol);
   ASSERT_EFI_ERROR (Status);
 
-  FdtImage = (VOID*)(UINTN)PcdGet32 (PcdFdtBaseAddress);
-  Retval = FdtCheckHeader (FdtImage);
-  if (Retval != 0) {
+  Status = BoardInfoGetRevisionCode (&mBoardRevision);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR,
+        "%a: Failed to get board revision code. Status=%r\n",
+        __func__, Status));
+  }
+
+  FdtImage = FdtPlatformGetBase ();
+  if (FdtImage == NULL) {
     /*
      * Any one of:
      * - Invalid config.txt device_tree_address (not PcdFdtBaseAddress)
@@ -498,39 +509,48 @@ FdtDxeInitialize (
    * These are all best-effort.
    */
 
-  Status = SanitizePSCI ();
-  if (EFI_ERROR (Status)) {
-    Print (L"Failed to sanitize PSCI: %r\n", Status);
-  }
-
   Status = CleanMemoryNodes ();
   if (EFI_ERROR (Status)) {
-    Print (L"Failed to clean memory nodes: %r\n", Status);
+    DEBUG ((DEBUG_ERROR, "Failed to clean memory nodes: %r\n", Status));
   }
 
   Status = CleanSimpleFramebuffer ();
   if (EFI_ERROR (Status)) {
-    Print (L"Failed to clean frame buffer: %r\n", Status);
+    DEBUG ((DEBUG_ERROR, "Failed to clean frame buffer: %r\n", Status));
   }
 
-  Status = FixEthernetAliases ();
-  if (EFI_ERROR (Status)) {
-    Print (L"Failed to fix ethernet aliases: %r\n", Status);
+  if (BoardRevisionGetModelFamily (mBoardRevision) < 5) {
+    Status = SanitizePSCI ();
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "Failed to sanitize PSCI: %r\n", Status));
+    }
+
+    Status = FixEthernetAliases ();
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "Failed to fix ethernet aliases: %r\n", Status));
+    }
+
+    Status = UpdateMacAddress ();
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "Failed to update MAC address: %r\n", Status));
+    }
+
+    Status = AddUsbCompatibleProperty ();
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "Failed to update USB compatible properties: %r\n", Status));
+    }
+
+    Status = SyncPcie ();
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "Failed to update PCIe address ranges: %r\n", Status));
+    }
   }
 
-  Status = UpdateMacAddress ();
-  if (EFI_ERROR (Status)) {
-    Print (L"Failed to update MAC address: %r\n", Status);
-  }
-
-  Status = AddUsbCompatibleProperty ();
-  if (EFI_ERROR (Status)) {
-    Print (L"Failed to update USB compatible properties: %r\n", Status);
-  }
-
-  SyncPcie ();
-  if (EFI_ERROR (Status)) {
-    Print (L"Failed to update PCIe address ranges: %r\n", Status);
+  if (BoardRevisionGetModelFamily (mBoardRevision) == 5) {
+    Status = Rp1PreserveBridgeReset (mFdtImage);
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "RP1: DT bridge handoff failed: %r\n", Status));
+    }
   }
 
   DEBUG ((DEBUG_INFO, "Installed devicetree at address %p\n", mFdtImage));

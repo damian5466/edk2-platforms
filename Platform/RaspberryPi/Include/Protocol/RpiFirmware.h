@@ -1,5 +1,6 @@
 /** @file
  *
+ *  Copyright (c) 2023, Mario Bălănică <mariobalanica02@gmail.com>
  *  Copyright (c) 2019, ARM Limited. All rights reserved.
  *  Copyright (c) 2017 - 2020, Andrei Warkentin <andrey.warkentin@gmail.com>
  *  Copyright (c) 2016, Linaro Limited. All rights reserved.
@@ -13,6 +14,17 @@
 
 #define RASPBERRY_PI_FIRMWARE_PROTOL_GUID \
   { 0x0ACA9535, 0x7AD0, 0x4286, { 0xB0, 0x2E, 0x87, 0xFA, 0x7E, 0x2A, 0x57, 0x11 } }
+
+typedef enum {
+	RpiRtcTime = 0,
+	RpiRtcAlarm,
+	RpiRtcAlarmPending,
+	RpiRtcAlarmEnable,
+	RpiRtcBatteryChargeVoltage,
+	RpiRtcBatteryChargeVoltageMin,
+	RpiRtcBatteryChargeVoltageMax,
+	RpiRtcBatteryVoltage,
+} RASPBERRY_PI_RTC_REGISTER;
 
 typedef
 EFI_STATUS
@@ -113,39 +125,9 @@ EFI_STATUS
   );
 
 typedef
-CHAR8*
-(EFIAPI *GET_MODEL_NAME) (
-  INTN ModelId
-  );
-
-typedef
-EFI_STATUS
-(EFIAPI *GET_MODEL_FAMILY) (
-  UINT32 *ModelFamily
-  );
-
-typedef
 EFI_STATUS
 (EFIAPI *GET_FIRMWARE_REVISION) (
   UINT32 *Revision
-  );
-
-typedef
-EFI_STATUS
-(EFIAPI *GET_MODEL_INSTALLED_MB) (
-  UINT32 *InstalledMB
-  );
-
-typedef
-CHAR8*
-(EFIAPI *GET_MANUFACTURER_NAME) (
-  INTN ManufacturerId
-  );
-
-typedef
-CHAR8*
-(EFIAPI *GET_CPU_NAME) (
-  INTN CpuId
   );
 
 typedef
@@ -171,6 +153,20 @@ EFI_STATUS
   UINTN State
   );
 
+typedef
+EFI_STATUS
+(EFIAPI *GET_RTC) (
+  IN   RASPBERRY_PI_RTC_REGISTER  Register,
+  OUT  UINT32                     *Value
+  );
+
+typedef
+EFI_STATUS
+(EFIAPI *SET_RTC) (
+  IN   RASPBERRY_PI_RTC_REGISTER  Register,
+  IN   UINT32                     Value
+  );
+
 typedef struct {
   SET_POWER_STATE        SetPowerState;
   GET_MAC_ADDRESS        GetMacAddress;
@@ -186,17 +182,16 @@ typedef struct {
   GET_SERIAL             GetSerial;
   GET_MODEL              GetModel;
   GET_MODEL_REVISION     GetModelRevision;
-  GET_MODEL_NAME         GetModelName;
-  GET_MODEL_FAMILY       GetModelFamily;
   GET_FIRMWARE_REVISION  GetFirmwareRevision;
-  GET_MANUFACTURER_NAME  GetManufacturerName;
-  GET_CPU_NAME           GetCpuName;
   GET_ARM_MEM            GetArmMem;
-  GET_MODEL_INSTALLED_MB GetModelInstalledMB;
   NOTIFY_XHCI_RESET      NotifyXhciReset;
   GET_CLOCK_STATE        GetClockState;
   SET_CLOCK_STATE        SetClockState;
   GPIO_SET_CFG           SetGpioConfig;
+  GET_RTC                GetRtc;
+  SET_RTC                SetRtc;
+  // Boot-time only. Words: updater state, last error, SPI check, A/B enabled.
+  EFI_STATUS (EFIAPI *GetEepromUpdateStatus) (OUT UINT32 Words[4]);
 } RASPBERRY_PI_FIRMWARE_PROTOCOL;
 
 extern EFI_GUID gRaspberryPiFirmwareProtocolGuid;

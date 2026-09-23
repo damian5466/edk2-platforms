@@ -51,11 +51,14 @@
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
 #include <Library/PrintLib.h>
+#include <Library/BoardInfoLib.h>
+#include <Library/BoardRevisionHelperLib.h>
 #include <ConfigVars.h>
 
 #define SMB_IS_DIGIT(c)  (((c) >= '0') && ((c) <= '9'))
 
 STATIC RASPBERRY_PI_FIRMWARE_PROTOCOL *mFwProtocol;
+STATIC UINT32                         mBoardRevisionCode;
 
 /***********************************************************************
         SMBIOS data definition  TYPE0  BIOS Information
@@ -243,9 +246,7 @@ SMBIOS_TABLE_TYPE4 mProcessorInfoType4 = {
   CentralProcessor,                // ProcessorType;          ///< The enumeration value from PROCESSOR_TYPE_DATA.
   ProcessorFamilyIndicatorFamily2, // ProcessorFamily;        ///< The enumeration value from PROCESSOR_FAMILY2_DATA.
   2,                               // ProcessorManufacture String;
-  {                                // ProcessorId;
-    0x00, 0x00, 0x00, 0x00
-  },
+  { 0 },                           // ProcessorId (filled from MIDR below)
   3,                    // ProcessorVersion String;
   {                     // Voltage;
     1,  // ProcessorVoltageCapability5V        :1;
@@ -310,11 +311,11 @@ SMBIOS_TABLE_TYPE7 mCacheInfoType7_L1I = {
        //Operational Mode   :2  (Unknown)
        //Reserved           :6
 #if (RPI_MODEL == 4)
-  {0x0030, 0},              // Maximum Size (RPi4: 48KB)
-  {0x0030, 0},              // Install Size (RPi4: 48KB)
+  { 0x0030, 0 },            // Maximum Size (RPi4: 48KB, 1KB units)
+  { 0x0030, 0 },            // Install Size (RPi4: 48KB, 1KB units)
 #else
-  {0x0010, 0},              // Maximum Size (RPi3: 16KB)
-  {0x0010, 0},              // Install Size (RPi3: 16KB)
+  { 0x0010, 0 },            // Maximum Size (RPi3: 16KB, 1KB units)
+  { 0x0010, 0 },            // Install Size (RPi3: 16KB, 1KB units)
 #endif
   {                         // Supported SRAM Type
     0,  //Other             :1
@@ -358,11 +359,11 @@ SMBIOS_TABLE_TYPE7 mCacheInfoType7_L1D = {
        //Operational Mode   :2  (WB)
        //Reserved           :6
 #if (RPI_MODEL == 4)
-  {0x0020, 0},              // Maximum Size (RPi4: 32KB)
-  {0x0020, 0},              // Install Size (RPi4: 32KB)
+  { 0x0020, 0 },            // Maximum Size (RPi4: 32KB, 1KB units)
+  { 0x0020, 0 },            // Install Size (RPi4: 32KB, 1KB units)
 #else
-  {0x0010, 0},              // Maximum Size (RPi3: 16KB)
-  {0x0010, 0},              // Install Size (RPi3: 16KB)
+  { 0x0010, 0 },            // Maximum Size (RPi3: 16KB, 1KB units)
+  { 0x0010, 0 },            // Install Size (RPi3: 16KB, 1KB units)
 #endif
   {                         // Supported SRAM Type
     0,  //Other             :1
@@ -410,11 +411,11 @@ SMBIOS_TABLE_TYPE7 mCacheInfoType7_L2 = {
        //Operational Mode   :2  (WB)
        //Reserved           :6
 #if (RPI_MODEL == 4)
-  {0x0400, 0},              // Maximum Size (RPi4: 1MB)
-  {0x0400, 0},              // Install Size (RPi4: 1MB)
+  { 0x0400, 0 },            // Maximum Size (RPi4: 1MB, 1KB units)
+  { 0x0400, 0 },            // Install Size (RPi4: 1MB, 1KB units)
 #else
-  {0x0200, 0},              // Maximum Size (RPi3: 512KB)
-  {0x0200, 0},              // Install Size (RPi3: 512KB)
+  { 0x0200, 0 },            // Maximum Size (RPi3: 512KB, 1KB units)
+  { 0x0200, 0 },            // Install Size (RPi3: 512KB, 1KB units)
 #endif
   {                         // Supported SRAM Type
     0,  //Other             :1
@@ -859,30 +860,19 @@ SysInfoUpdateSmbiosType1 (
   VOID
   )
 {
-  UINT32 BoardRevision = 0;
   EFI_STATUS Status = EFI_SUCCESS;
   UINT64 BoardSerial = 0;
-  INTN Prod = -1;
-  INTN Manu = -1;
-
-  Status = mFwProtocol->GetModelRevision (&BoardRevision);
-  if (EFI_ERROR (Status)) {
-    DEBUG ((DEBUG_ERROR, "Failed to get board model: %r\n", Status));
-  } else {
-    Prod = (BoardRevision >> 4) & 0xFF;
-    Manu = (BoardRevision >> 16) & 0x0F;
-  }
 
   AsciiStrCpyS (mSysInfoProductName, sizeof (mSysInfoProductName),
-    mFwProtocol->GetModelName (Prod));
+    BoardRevisionGetModelName (mBoardRevisionCode));
   AsciiStrCpyS (mSysInfoManufName, sizeof (mSysInfoManufName),
-    mFwProtocol->GetManufacturerName (Manu));
+    BoardRevisionGetManufacturerName (mBoardRevisionCode));
   AsciiSPrint (mSysInfoVersionName, sizeof (mSysInfoVersionName),
-    "%X", BoardRevision);
+    "%X", mBoardRevisionCode);
 
-  I64ToHexString (mSysInfoSKU, sizeof (mSysInfoSKU), BoardRevision);
+  I64ToHexString (mSysInfoSKU, sizeof (mSysInfoSKU), mBoardRevisionCode);
 
-  Status = mFwProtocol->GetSerial (&BoardSerial);
+  Status = BoardInfoGetSerialNumber (&BoardSerial);
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "Failed to get board serial: %r\n", Status));
   }
@@ -891,7 +881,7 @@ SysInfoUpdateSmbiosType1 (
 
   DEBUG ((DEBUG_ERROR, "Board Serial Number: %a\n", mSysInfoSerial));
 
-  mSysInfoType1.Uuid.Data1 = BoardRevision;
+  mSysInfoType1.Uuid.Data1 = mBoardRevisionCode;
   mSysInfoType1.Uuid.Data2 = 0x0;
   mSysInfoType1.Uuid.Data3 = 0x0;
   // Swap endianness, so that the serial is more user-friendly as a UUID
@@ -983,7 +973,7 @@ ProcessorInfoUpdateSmbiosType4 (
     DEBUG ((DEBUG_INFO, "Current CPU speed: %uHz\n", Rate));
   }
 
-  AsciiStrCpyS (mCpuName, sizeof (mCpuName), mFwProtocol->GetCpuName (-1));
+  AsciiStrCpyS (mCpuName, sizeof (mCpuName), BoardRevisionGetProcessorName (mBoardRevisionCode));
 
   ProcessorId = (UINT64 *)&(mProcessorInfoType4.ProcessorId);
   *ProcessorId = ArmReadMidr();
@@ -1043,25 +1033,15 @@ PhyMemArrayInfoUpdateSmbiosType16 (
   )
 {
   EFI_SMBIOS_HANDLE MemArraySmbiosHandle;
-  EFI_STATUS        Status;
-  UINT32            InstalledMB = 0;
 
- //
- // Update memory size fields:
- //  - Type 16 MaximumCapacity in KB
- //  - Type 17 size in MB (since bit 15 = 0)
- //  - Type 17 VolatileSize in Bytes
- //
+  //
+  // Update memory size fields:
+  //  - Type 16 MaximumCapacity in KB
+  //  - Type 17 size in MB (since bit 15 = 0)
+  //  - Type 17 VolatileSize in Bytes
+  //
 
- // The minimum RAM size used on any Raspberry Pi model is 256 MB
-  mMemDevInfoType17.Size = 256;
-
-  Status = mFwProtocol->GetModelInstalledMB (&InstalledMB);
-  if (Status != EFI_SUCCESS) {
-    DEBUG ((DEBUG_WARN, "Couldn't get the board memory size - defaulting to 256 MB: %r\n", Status));
-  } else {
-    mMemDevInfoType17.Size = InstalledMB; // Size in MB
-  }
+  mMemDevInfoType17.Size = BoardRevisionGetMemorySize (mBoardRevisionCode) / 1024 / 1024;
 
   mPhyMemArrayInfoType16.MaximumCapacity = mMemDevInfoType17.Size * 1024; // Size in KB
   mMemDevInfoType17.VolatileSize = MultU64x32 (mMemDevInfoType17.Size, 1024 * 1024);  // Size in Bytes
@@ -1094,26 +1074,17 @@ MemArrMapInfoUpdateSmbiosType19 (
   VOID
   )
 {
-  EFI_STATUS Status;
-  UINT32 InstalledMB = 0;
-
   // Note: Type 19 addresses are expressed in KB, not bytes
   // The memory layout used in all known Pi SoC's starts at 0
   mMemArrMapInfoType19.StartingAddress = 0;
 
-  // The minimum RAM size used on any Raspberry Pi model is 256 MB
-  mMemArrMapInfoType19.EndingAddress = 256 * 1024;
-  Status = mFwProtocol->GetModelInstalledMB (&InstalledMB);
-  if (Status != EFI_SUCCESS) {
-    DEBUG ((DEBUG_WARN, "Couldn't get the board memory size - defaulting to 256 MB: %r\n", Status));
-  } else {
-    if (PcdGet32 (PcdRamMoreThan3GB) && PcdGet32 (PcdRamLimitTo3GB)) {
-      ASSERT (InstalledMB > 3 * 1024);
-      mMemArrMapInfoType19.EndingAddress = 3 * 1024 * 1024;
-    } else {
-      mMemArrMapInfoType19.EndingAddress = InstalledMB * 1024;
-    }
+  mMemArrMapInfoType19.EndingAddress = BoardRevisionGetMemorySize (mBoardRevisionCode) / 1024;
+
+  if (PcdGet32 (PcdRamMoreThan3GB) && PcdGet32 (PcdRamLimitTo3GB)) {
+    ASSERT (mMemArrMapInfoType19.EndingAddress > 3 * 1024 * 1024);
+    mMemArrMapInfoType19.EndingAddress = 3 * 1024 * 1024;
   }
+
   mMemArrMapInfoType19.EndingAddress -= 1;
 
   LogSmbiosData ((EFI_SMBIOS_TABLE_HEADER*)&mMemArrMapInfoType19, mMemArrMapInfoType19Strings, NULL);
@@ -1148,6 +1119,13 @@ PlatformSmbiosDriverEntryPoint (
   ASSERT_EFI_ERROR (Status);
   if (EFI_ERROR (Status)) {
     return Status;
+  }
+
+  Status = BoardInfoGetRevisionCode (&mBoardRevisionCode);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR,
+        "%a: Failed to get board revision code - some fields will be inaccurate! Status=%r\n",
+        __func__, Status));
   }
 
   BIOSInfoUpdateSmbiosType0 ();

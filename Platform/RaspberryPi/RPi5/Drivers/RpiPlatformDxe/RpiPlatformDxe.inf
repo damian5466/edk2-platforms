@@ -1,0 +1,75 @@
+#/** @file
+#
+#  Copyright (c) 2023-2024, Mario Bălănică <mariobalanica02@gmail.com>
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+#**/
+
+[Defines]
+  INF_VERSION                    = 0x0001001A
+  BASE_NAME                      = RpiPlatformDxe
+  FILE_GUID                      = f6490266-0e7f-492e-8e15-ac69c1b7708a
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = RpiPlatformDxeEntryPoint
+
+[Sources]
+  RpiPlatformDxe.c
+  RpiPlatformDxeHii.uni
+  RpiPlatformDxeHii.vfr
+  ConfigTable.c
+  PciMemory.c
+  Rp1Handoff.c
+  Peripherals.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  EmbeddedPkg/EmbeddedPkg.dec
+  Platform/RaspberryPi/RaspberryPi.dec
+  Platform/RaspberryPi/RPi5/RPi5.dec
+  Silicon/Broadcom/BroadcomPkg.dec
+  Silicon/Broadcom/Bcm27xx/Bcm27xx.dec
+  Silicon/RaspberryPi/RpiSiliconPkg/RpiSiliconPkg.dec
+
+[LibraryClasses]
+  AcpiLib
+  BaseLib
+  BaseMemoryLib
+  Bcm2712GpioLib
+  BoardInfoLib
+  BoardRevisionHelperLib
+  DebugLib
+  DevicePathLib
+  DxeServicesTableLib
+  FdtLib
+  FdtPlatformLib
+  HiiLib
+  IoLib
+  MemoryAllocationLib
+  PeCoffGetEntryPointLib
+  UefiLib
+  UefiBootServicesTableLib
+  UefiRuntimeServicesTableLib
+  UefiDriverEntryPoint
+
+[Guids]
+  gRpiPlatformFormSetGuid
+  gEfiEventExitBootServicesGuid
+  gEfiEventReadyToBootGuid
+
+[Protocols]
+  gEfiAcpiSdtProtocolGuid                     ## CONSUMES
+  gBrcmStbSdhciDeviceProtocolGuid             ## PRODUCES
+  gRp1BusProtocolGuid                         ## CONSUMES
+  gEfiPciIoProtocolGuid                       ## CONSUMES
+  gBcm2712PciePlatformProtocolGuid            ## PRODUCES
+
+[Pcd]
+  gRaspberryPiTokenSpaceGuid.PcdSystemTableMode
+
+[Depex]
+  gEfiVariableArchProtocolGuid
+  AND gEfiVariableWriteArchProtocolGuid
+  AND gEfiAcpiSdtProtocolGuid

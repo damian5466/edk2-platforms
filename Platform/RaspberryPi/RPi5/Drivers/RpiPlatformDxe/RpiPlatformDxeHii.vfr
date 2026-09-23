@@ -1,0 +1,154 @@
+/** @file
+ *
+ *  Copyright (c) 2023-2024, Mario Bălănică <mariobalanica02@gmail.com>
+ *
+ *  SPDX-License-Identifier: BSD-2-Clause-Patent
+ *
+ **/
+
+#include <Uefi/UefiMultiPhase.h>
+#include <Guid/HiiPlatformSetupFormset.h>
+#include <Guid/RpiPlatformFormSetGuid.h>
+#include <RpiPlatformVarStoreData.h>
+#include <ConfigVars.h>
+
+#include "ConfigTable.h"
+#include "Peripherals.h"
+
+formset
+    guid      = RPI_PLATFORM_FORMSET_GUID,
+    title     = STRING_TOKEN(STR_FORM_SET_TITLE),
+    help      = STRING_TOKEN(STR_FORM_SET_TITLE_HELP),
+    classguid = EFI_HII_PLATFORM_SETUP_FORMSET_GUID,
+
+    efivarstore SYSTEM_TABLE_MODE_VARSTORE_DATA,
+      attribute = EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS | EFI_VARIABLE_NON_VOLATILE,
+      name  = SystemTableMode,
+      guid  = RPI_PLATFORM_FORMSET_GUID;
+
+    efivarstore ACPI_SD_COMPAT_MODE_VARSTORE_DATA,
+      attribute = EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS | EFI_VARIABLE_NON_VOLATILE,
+      name  = AcpiSdCompatMode,
+      guid  = RPI_PLATFORM_FORMSET_GUID;
+
+    efivarstore ACPI_SD_LIMIT_UHS_VARSTORE_DATA,
+      attribute = EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS | EFI_VARIABLE_NON_VOLATILE,
+      name  = AcpiSdLimitUhs,
+      guid  = RPI_PLATFORM_FORMSET_GUID;
+
+    efivarstore ACPI_PCIE_ECAM_COMPAT_MODE_VARSTORE_DATA,
+      attribute = EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS | EFI_VARIABLE_NON_VOLATILE,
+      name  = AcpiPcieEcamCompatMode,
+      guid  = RPI_PLATFORM_FORMSET_GUID;
+
+    efivarstore ACPI_PCIE_32_BIT_BAR_SPACE_SIZE_MB_VARSTORE_DATA,
+      attribute = EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS | EFI_VARIABLE_NON_VOLATILE,
+      name  = AcpiPcie32BitBarSpaceSizeMB,
+      guid  = RPI_PLATFORM_FORMSET_GUID;
+
+    efivarstore BCM2712_PCIE_CONTROLLER_SETTINGS,
+      attribute = EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS | EFI_VARIABLE_NON_VOLATILE,
+      name  = Pcie1Settings,
+      guid  = RPI_PLATFORM_FORMSET_GUID;
+
+    form formid = 1,
+      title  = STRING_TOKEN(STR_FORM_SET_TITLE);
+
+      subtitle text = STRING_TOKEN(STR_FORM_SET_TITLE_SUBTITLE);
+      subtitle text = STRING_TOKEN(STR_NULL_STRING);
+
+      goto 0x1000,
+        prompt = STRING_TOKEN(STR_SYSTEM_TABLE_FORM_TITLE),
+        help = STRING_TOKEN(STR_SYSTEM_TABLE_FORM_HELP);
+
+      goto 0x1001,
+        prompt = STRING_TOKEN(STR_PCIE_FORM_TITLE),
+        help = STRING_TOKEN(STR_PCIE_FORM_HELP);
+    endform;
+
+    form formid = 0x1000,
+        title  = STRING_TOKEN(STR_SYSTEM_TABLE_FORM_TITLE);
+
+        oneof varid = SystemTableMode.Mode,
+          prompt      = STRING_TOKEN(STR_SYSTEM_TABLE_MODE_PROMPT),
+          help        = STRING_TOKEN(STR_SYSTEM_TABLE_MODE_HELP),
+          flags       = NUMERIC_SIZE_4 | INTERACTIVE | RESET_REQUIRED,
+          default     = SYSTEM_TABLE_MODE_ACPI,
+          option text = STRING_TOKEN(STR_SYSTEM_TABLE_MODE_ACPI), value = SYSTEM_TABLE_MODE_ACPI, flags = 0;
+          option text = STRING_TOKEN(STR_SYSTEM_TABLE_MODE_FDT), value = SYSTEM_TABLE_MODE_DT, flags = 0;
+          option text = STRING_TOKEN(STR_SYSTEM_TABLE_MODE_ACPI_FDT), value = SYSTEM_TABLE_MODE_BOTH, flags = 0;
+        endoneof;
+
+        suppressif (get(SystemTableMode.Mode) != SYSTEM_TABLE_MODE_ACPI AND get(SystemTableMode.Mode) != SYSTEM_TABLE_MODE_BOTH);
+          subtitle text = STRING_TOKEN(STR_NULL_STRING);
+          subtitle text = STRING_TOKEN(STR_SYSTEM_TABLE_ACPI_SUBTITLE);
+
+          subtitle text = STRING_TOKEN(STR_NULL_STRING);
+          subtitle text = STRING_TOKEN(STR_ACPI_SD_SUBTITLE);
+
+          oneof varid = AcpiSdCompatMode.Value,
+            prompt      = STRING_TOKEN(STR_ACPI_SD_COMPAT_MODE_PROMPT),
+            help        = STRING_TOKEN(STR_ACPI_SD_COMPAT_MODE_HELP),
+            flags       = NUMERIC_SIZE_1 | INTERACTIVE | RESET_REQUIRED,
+            default     = ACPI_SD_COMPAT_MODE_DEFAULT,
+            option text = STRING_TOKEN(STR_ACPI_SD_COMPAT_BRCMSTB_BAYTRAIL), value = ACPI_SD_COMPAT_MODE_BRCMSTB_BAYTRAIL, flags = 0;
+            option text = STRING_TOKEN(STR_ACPI_SD_COMPAT_FULL_BAYTRAIL), value = ACPI_SD_COMPAT_MODE_FULL_BAYTRAIL, flags = 0;
+          endoneof;
+
+          checkbox varid = AcpiSdLimitUhs.Value,
+            prompt      = STRING_TOKEN(STR_ACPI_SD_LIMIT_UHS_PROMPT),
+            help        = STRING_TOKEN(STR_ACPI_SD_LIMIT_UHS_HELP),
+            flags       = CHECKBOX_DEFAULT | CHECKBOX_DEFAULT_MFG | RESET_REQUIRED,
+            default     = ACPI_SD_LIMIT_UHS_DEFAULT,
+          endcheckbox;
+
+          subtitle text = STRING_TOKEN(STR_NULL_STRING);
+          subtitle text = STRING_TOKEN(STR_ACPI_PCIE_SUBTITLE);
+
+          oneof varid = AcpiPcieEcamCompatMode.Value,
+            prompt      = STRING_TOKEN(STR_ACPI_PCIE_ECAM_COMPAT_MODE_PROMPT),
+            help        = STRING_TOKEN(STR_ACPI_PCIE_ECAM_COMPAT_MODE_HELP),
+            flags       = NUMERIC_SIZE_4 | INTERACTIVE | RESET_REQUIRED,
+            default     = ACPI_PCIE_ECAM_COMPAT_MODE_DEFAULT,
+            option text = STRING_TOKEN(STR_ACPI_PCIE_ECAM_COMPAT_MODE_NXPMX6_DEN0115), value = ACPI_PCIE_ECAM_COMPAT_MODE_NXPMX6_DEN0115, flags = 0;
+            option text = STRING_TOKEN(STR_ACPI_PCIE_ECAM_COMPAT_MODE_NXPMX6_GRAVITON), value = ACPI_PCIE_ECAM_COMPAT_MODE_NXPMX6_GRAVITON, flags = 0;
+            option text = STRING_TOKEN(STR_ACPI_PCIE_ECAM_COMPAT_MODE_DEN0115), value = ACPI_PCIE_ECAM_COMPAT_MODE_DEN0115, flags = 0;
+            option text = STRING_TOKEN(STR_ACPI_PCIE_ECAM_COMPAT_MODE_NXPMX6), value = ACPI_PCIE_ECAM_COMPAT_MODE_NXPMX6, flags = 0;
+            option text = STRING_TOKEN(STR_ACPI_PCIE_ECAM_COMPAT_MODE_GRAVITON), value = ACPI_PCIE_ECAM_COMPAT_MODE_GRAVITON, flags = 0;
+          endoneof;
+
+          numeric varid = AcpiPcie32BitBarSpaceSizeMB.Value,
+            prompt  = STRING_TOKEN(STR_ACPI_PCIE_32_BIT_BAR_SPACE_SIZE_MB_PROMPT),
+            help    = STRING_TOKEN(STR_ACPI_PCIE_32_BIT_BAR_SPACE_SIZE_MB_HELP),
+            flags   = DISPLAY_UINT_DEC | NUMERIC_SIZE_4 | INTERACTIVE | RESET_REQUIRED,
+            minimum = ACPI_PCIE_32_BIT_BAR_SPACE_SIZE_MB_MINIMUM,
+            maximum = ACPI_PCIE_32_BIT_BAR_SPACE_SIZE_MB_MAXIMUM,
+            step    = ACPI_PCIE_32_BIT_BAR_SPACE_SIZE_MB_STEP,
+            default = ACPI_PCIE_32_BIT_BAR_SPACE_SIZE_MB_DEFAULT,
+          endnumeric;
+        endif;
+    endform;
+
+    form formid = 0x1001,
+        title  = STRING_TOKEN(STR_PCIE_FORM_TITLE);
+
+        subtitle text = STRING_TOKEN(STR_PCIE1_SUBTITLE);
+
+        checkbox varid = Pcie1Settings.Enabled,
+          prompt      = STRING_TOKEN(STR_ENABLED),
+          help        = STRING_TOKEN(STR_NULL_STRING),
+          flags       = CHECKBOX_DEFAULT | CHECKBOX_DEFAULT_MFG | RESET_REQUIRED,
+          default     = PCIE1_SETTINGS_ENABLED_DEFAULT,
+        endcheckbox;
+
+        oneof varid = Pcie1Settings.MaxLinkSpeed,
+          prompt      = STRING_TOKEN(STR_PCIE_LINK_SPEED_PROMPT),
+          help        = STRING_TOKEN(STR_PCIE_LINK_SPEED_HELP),
+          flags       = NUMERIC_SIZE_1 | INTERACTIVE | RESET_REQUIRED,
+          default     = PCIE1_SETTINGS_MAX_LINK_SPEED_DEFAULT,
+          option text = STRING_TOKEN(STR_PCIE_LINK_SPEED_GEN1), value = 1, flags = 0;
+          option text = STRING_TOKEN(STR_PCIE_LINK_SPEED_GEN2), value = 2, flags = 0;
+          option text = STRING_TOKEN(STR_PCIE_LINK_SPEED_GEN3), value = 3, flags = 0;
+        endoneof;
+    endform;
+endformset;

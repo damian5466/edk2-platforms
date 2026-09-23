@@ -1,0 +1,79 @@
+/** @file
+ *
+ *  Multiple APIC Description Table (MADT)
+ *
+ *  Copyright (c) 2023, Mario Bălănică <mariobalanica02@gmail.com>
+ *  Copyright (c) 2016 Linaro Ltd. All rights reserved.
+ *  Copyright (c) 2012 - 2015, ARM Limited. All rights reserved.
+ *
+ *  SPDX-License-Identifier: BSD-2-Clause-Patent
+ *
+ **/
+
+#include <IndustryStandard/Acpi.h>
+#include <Library/AcpiLib.h>
+#include <Library/ArmLib.h>
+#include <Library/PcdLib.h>
+
+#include "AcpiTables.h"
+
+//
+// Multiple APIC Description Table
+//
+#pragma pack (1)
+
+typedef struct {
+  EFI_ACPI_6_3_MULTIPLE_APIC_DESCRIPTION_TABLE_HEADER   Header;
+  EFI_ACPI_6_3_GIC_STRUCTURE                            GicInterfaces[4];
+  EFI_ACPI_6_3_GIC_DISTRIBUTOR_STRUCTURE                GicDistributor;
+} PI_MULTIPLE_APIC_DESCRIPTION_TABLE;
+
+#pragma pack ()
+
+// Unspecified fields are zero: PSCI is used instead of the parking protocol.
+#define RPI5_GICC_INIT(Cpu, Mpid, PmuIrq) {                         \
+  .Type = EFI_ACPI_6_3_GIC,                                        \
+  .Length = sizeof (EFI_ACPI_6_3_GIC_STRUCTURE),                     \
+  .CPUInterfaceNumber = (Cpu),                                     \
+  .AcpiProcessorUid = (Cpu),                                       \
+  .Flags = EFI_ACPI_6_3_GIC_ENABLED,                                \
+  .PerformanceInterruptGsiv = (PmuIrq),                             \
+  .PhysicalBaseAddress = FixedPcdGet64 (PcdGicInterruptInterfaceBase), \
+  .GICV = FixedPcdGet64 (PcdGicInterruptInterfaceVBase),             \
+  .GICH = FixedPcdGet64 (PcdGicInterruptInterfaceHBase),             \
+  .VGICMaintenanceInterrupt = FixedPcdGet32 (PcdGicGsivId),          \
+  .MPIDR = (Mpid)                                                  \
+  }
+
+PI_MULTIPLE_APIC_DESCRIPTION_TABLE Madt = {
+  {
+    ACPI_HEADER (
+      EFI_ACPI_6_3_MULTIPLE_APIC_DESCRIPTION_TABLE_SIGNATURE,
+      PI_MULTIPLE_APIC_DESCRIPTION_TABLE,
+      EFI_ACPI_6_3_MULTIPLE_APIC_DESCRIPTION_TABLE_REVISION
+    ),
+    //
+    // MADT specific fields
+    //
+    0, // LocalApicAddress
+    0, // Flags
+  },
+  {
+    RPI5_GICC_INIT (0, GET_MPID (0, 0x000), FixedPcdGet32 (PcdGicPmuIrq0)),
+    RPI5_GICC_INIT (1, GET_MPID (0, 0x100), FixedPcdGet32 (PcdGicPmuIrq1)),
+    RPI5_GICC_INIT (2, GET_MPID (0, 0x200), FixedPcdGet32 (PcdGicPmuIrq2)),
+    RPI5_GICC_INIT (3, GET_MPID (0, 0x300), FixedPcdGet32 (PcdGicPmuIrq3)),
+  },
+  {
+    .Type = EFI_ACPI_6_3_GICD,
+    .Length = sizeof (EFI_ACPI_6_3_GIC_DISTRIBUTOR_STRUCTURE),
+    .PhysicalBaseAddress = FixedPcdGet64 (PcdGicDistributorBase),
+    .GicVersion = EFI_ACPI_6_3_GIC_V2
+  }
+};
+
+//
+// Reference the table being generated to prevent the optimizer from removing the
+// data structure from the executable
+//
+VOID* CONST ReferenceAcpiTable = &Madt;

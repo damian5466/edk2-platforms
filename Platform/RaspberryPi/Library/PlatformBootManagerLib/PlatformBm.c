@@ -17,7 +17,6 @@
 #include <Library/DevicePathLib.h>
 #include <Library/HobLib.h>
 #include <Library/PcdLib.h>
-#include <Library/TimerLib.h>
 #include <Library/UefiBootManagerLib.h>
 #include <Library/UefiLib.h>
 #include <Library/PrintLib.h>
@@ -26,7 +25,6 @@
 #include <Protocol/EsrtManagement.h>
 #include <Protocol/GraphicsOutput.h>
 #include <Protocol/LoadedImage.h>
-#include <Protocol/PlatformSpecificResetHandler.h>
 #include <Guid/BootDiscoveryPolicy.h>
 #include <Guid/EventGroup.h>
 #include <Guid/TtyTerm.h>
@@ -339,7 +337,7 @@ Connect (
                   NULL,   // RemainingDevicePath -- produce all children
                   FALSE   // Recursive
                   );
-  DEBUG ((EFI_ERROR (Status) ? DEBUG_ERROR : DEBUG_VERBOSE, "%a: %s: %r\n",
+  DEBUG ((EFI_ERROR (Status) ? EFI_D_ERROR : EFI_D_VERBOSE, "%a: %s: %r\n",
     __func__, ReportText, Status));
 }
 
@@ -457,7 +455,7 @@ RemoveStaleBootOptions (
 
       DevicePathString = ConvertDevicePathToText(BootOptions[Index].FilePath, FALSE, FALSE);
       DEBUG ((
-        EFI_ERROR (Status) ? DEBUG_WARN : DEBUG_INFO,
+        EFI_ERROR (Status) ? EFI_D_WARN : EFI_D_INFO,
         "%a: removing stale Boot#%04x %s: %r\n",
         __func__,
         (UINT32)BootOptions[Index].OptionNumber,
@@ -529,66 +527,6 @@ SerialConPrint (
   }
 }
 
-/**
-  Disconnect everything.
-  Modified from the UEFI 2.3 spec (May 2009 version)
-
-**/
-STATIC
-VOID
-DisconnectAll (
-  VOID
-  )
-{
-  EFI_STATUS  Status;
-  UINTN       HandleCount;
-  EFI_HANDLE  *HandleBuffer;
-  UINTN       HandleIndex;
-
-  /*
-   * Retrieve the list of all handles from the handle database
-   */
-  Status = gBS->LocateHandleBuffer (
-                  AllHandles,
-                  NULL,
-                  NULL,
-                  &HandleCount,
-                  &HandleBuffer
-                  );
-  if (EFI_ERROR (Status)) {
-    return;
-  }
-
-  for (HandleIndex = 0; HandleIndex < HandleCount; HandleIndex++) {
-    gBS->DisconnectController (HandleBuffer[HandleIndex], NULL, NULL);
-  }
-
-  gBS->FreePool(HandleBuffer);
-}
-
-
-STATIC
-VOID
-EFIAPI
-OnResetNotify (
-  IN EFI_RESET_TYPE  ResetType,
-  IN EFI_STATUS      ResetStatus,
-  IN UINTN           DataSize,
-  IN VOID            *ResetData OPTIONAL
-  )
-{
-  UINT32 Delay;
-
-  DisconnectAll ();
-
-  Delay = PcdGet32 (PcdPlatformResetDelay);
-  if (Delay != 0) {
-    DEBUG ((DEBUG_INFO, "Platform will be reset in %d.%d seconds...\n",
-          Delay / 1000000, (Delay % 1000000) / 100000));
-    MicroSecondDelay (Delay);
-  }
-}
-
 //
 // BDS Platform Functions
 //
@@ -611,7 +549,6 @@ PlatformBootManagerBeforeConsole (
 {
   EFI_STATUS Status;
   ESRT_MANAGEMENT_PROTOCOL *EsrtManagement;
-  EDKII_PLATFORM_SPECIFIC_RESET_HANDLER_PROTOCOL *ResetNotify;
 
   if (GetBootModeHob () == BOOT_ON_FLASH_UPDATE) {
     DEBUG ((DEBUG_INFO, "ProcessCapsules Before EndOfDxe ......\n"));
@@ -644,20 +581,6 @@ PlatformBootManagerBeforeConsole (
   EfiBootManagerUpdateConsoleVariable (ConIn, (EFI_DEVICE_PATH_PROTOCOL*)&mSerialConsole, NULL);
   EfiBootManagerUpdateConsoleVariable (ConOut, (EFI_DEVICE_PATH_PROTOCOL*)&mSerialConsole, NULL);
   EfiBootManagerUpdateConsoleVariable (ErrOut, (EFI_DEVICE_PATH_PROTOCOL*)&mSerialConsole, NULL);
-
-  Status = gBS->LocateProtocol (
-                  &gEdkiiPlatformSpecificResetHandlerProtocolGuid,
-                  NULL,
-                  (VOID **)&ResetNotify
-                  );
-  ASSERT_EFI_ERROR (Status);
-  if (!EFI_ERROR (Status)) {
-    Status = ResetNotify->RegisterResetNotify (
-                            ResetNotify,
-                            OnResetNotify
-                            );
-    ASSERT_EFI_ERROR (Status);
-  }
 
   //
   // Signal EndOfDxe PI Event
@@ -816,11 +739,6 @@ PlatformBootManagerAfterConsole (
     SerialConPrint (BOOT_PROMPT);
   } else {
     Print (BOOT_PROMPT);
-  }
-
-  Status = BootDiscoveryPolicyHandler ();
-  if (EFI_ERROR(Status)) {
-    DEBUG ((DEBUG_INFO, "Error applying Boot Discovery Policy:%r\n", Status));
   }
 
   Status = BootDiscoveryPolicyHandler ();

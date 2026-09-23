@@ -1,0 +1,339 @@
+/** @file
+ *
+ *  Enumeration descriptions for Raspberry Pi 5.
+ *  Register maps: Raspberry Pi downstream Linux bcm2712*.dtsi and rp1.dtsi.
+ *
+ *  SPDX-License-Identifier: BSD-2-Clause-Patent
+ *
+ **/
+
+// Included directly in \\_SB. These AXI masters must not inherit SOCB's
+// legacy 1 GiB DMA translation. Addresses are CPU physical, not VPU bus aliases.
+// HIDs are project-local enumeration IDs; no Pi 3/4 or generic driver CIDs.
+// No new _INI, power transition, reset, clock or interrupt-enable methods.
+//
+// SPI values in the Raspberry Pi DT are converted to GIC GSIs by adding 32.
+// Cascaded display interrupts are described by their parent GIC lines together
+// with the L2 controller registers, not by treating local bits as GIC numbers.
+
+#define BCM2712_MMIO(Base, Last, Length)                              \
+  QWordMemory (ResourceConsumer, PosDecode,                    \
+    MinFixed, MaxFixed, NonCacheable, ReadWrite,                \
+    0, Base, Last, 0, Length)
+
+// Patched only after recognizing the bootloader's C0/C1 or D0 pinctrl pair.
+// Unknown layouts hide the GPIO/pinctrl devices rather than claiming C1 sizes.
+Name (SREV, ACPI_PATCH_BYTE_VALUE)
+
+Device (GPU0) {
+  Name (_HID, "RPI1000")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 VideoCore VII V3D GPU")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+  Name (_CLS, Package () { 0x03, 0x02, 0x00 })
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x1002000000, 0x1002003FFF, 0x4000)
+    BCM2712_MMIO (0x1002008000, 0x100200DFFF, 0x6000)
+    BCM2712_MMIO (0x1002030800, 0x1002030EFF, 0x700)
+    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 282, 281 }
+  })
+}
+
+Device (DISP) {
+  Name (_HID, "RPI1001")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 display engine and dual HDMI audio/video")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+  // HVS, pixel valves, MOP/MOPLET, DVP, HDMI0/1, DDC and L2 IRQs.
+  // Both HDMI blocks share the HD register; reserve it only once.
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x107C580000, 0x107C599FFF, 0x1A000)
+    BCM2712_MMIO (0x107C410000, 0x107C4100FF, 0x100)
+    BCM2712_MMIO (0x107C411000, 0x107C4110FF, 0x100)
+    BCM2712_MMIO (0x107C500000, 0x107C500027, 0x28)
+    BCM2712_MMIO (0x107C501000, 0x107C50101F, 0x20)
+    BCM2712_MMIO (0x107C502000, 0x107C50202F, 0x30)
+    BCM2712_MMIO (0x107C700000, 0x107C70000F, 0x10)
+    BCM2712_MMIO (0x107C720000, 0x107C7200FF, 0x100)
+    BCM2712_MMIO (0x107D510600, 0x107D51062F, 0x30)
+    BCM2712_MMIO (0x107D508200, 0x107D508257, 0x58)
+    BCM2712_MMIO (0x107D508280, 0x107D5082D7, 0x58)
+    BCM2712_MMIO (0x107D508380, 0x107D50838F, 0x10)
+    BCM2712_MMIO (0x107C701400, 0x107C7016FF, 0x300)
+    BCM2712_MMIO (0x107C701000, 0x107C7011FF, 0x200)
+    BCM2712_MMIO (0x107C701D00, 0x107C701FFF, 0x300)
+    BCM2712_MMIO (0x107C702000, 0x107C70207F, 0x80)
+    BCM2712_MMIO (0x107C703800, 0x107C7039FF, 0x200)
+    BCM2712_MMIO (0x107C704000, 0x107C7047FF, 0x800)
+    BCM2712_MMIO (0x107C706400, 0x107C7066FF, 0x300)
+    BCM2712_MMIO (0x107C706000, 0x107C7061FF, 0x200)
+    BCM2712_MMIO (0x107C706D00, 0x107C706FFF, 0x300)
+    BCM2712_MMIO (0x107C707000, 0x107C70707F, 0x80)
+    BCM2712_MMIO (0x107C708800, 0x107C7089FF, 0x200)
+    BCM2712_MMIO (0x107C709000, 0x107C7097FF, 0x800)
+    BCM2712_MMIO (0x107C700100, 0x107C70017F, 0x80)
+    BCM2712_MMIO (0x107C700180, 0x107C7001FF, 0x80)
+    BCM2712_MMIO (0x107D510800, 0x107D5108FF, 0x100)
+    BCM2712_MMIO (0x107D511000, 0x107D5110FF, 0x100)
+    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 129, 133, 142, 271, 274 }
+  })
+}
+
+Device (HEVC) {
+  Name (_HID, "RPI1002")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 HEVC video decoder")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x1000800000, 0x100080FFFF, 0x10000)
+    BCM2712_MMIO (0x1000840000, 0x1000840FFF, 0x1000)
+    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 130 }
+  })
+}
+
+Device (ISP0) {
+  Name (_HID, "RPI1003")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 PiSP image signal processor back end")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x1000880000, 0x1000883FFF, 0x4000)
+    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 104 }
+  })
+}
+
+Device (DMA0) {
+  Name (_HID, "RPI1010")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 DMA controllers")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+  // Firmware reserves channels: drivers must honor the DT channel masks.
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      Package () { "brcm,dma-channel-mask", 0x0FF5 }
+    }
+  })
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x1000010000, 0x10000105FF, 0x600)
+    BCM2712_MMIO (0x1000010600, 0x1000010BFF, 0x600)
+    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123 }
+  })
+}
+
+Device (MMU0) {
+  Name (_HID, "RPI1011")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 multimedia IOMMUs and translation cache")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x1000005100, 0x100000517F, 0x80)
+    BCM2712_MMIO (0x1000005200, 0x100000527F, 0x80)
+    BCM2712_MMIO (0x1000005280, 0x10000052FF, 0x80)
+    BCM2712_MMIO (0x1000005B00, 0x1000005B7F, 0x80)
+  })
+}
+
+Device (MBX0) {
+  Name (_HID, "RPI1012")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 VideoCore firmware mailbox")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x107C013880, 0x107C0138BF, 0x40)
+    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 65 }
+  })
+}
+
+Device (PM00) {
+  Name (_HID, "RPI1013")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 power management and watchdog")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x107D200000, 0x107D200307, 0x308)
+  })
+}
+
+Device (RNG0) {
+  Name (_HID, "RPI1014")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 RNG200 random number generator")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x107D208000, 0x107D208027, 0x28)
+  })
+}
+
+Device (THM0) {
+  Name (_HID, "RPI1015")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 AVS and temperature monitor")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x107D542000, 0x107D542EFF, 0xF00)
+  })
+}
+
+Device (BTU0) {
+  Name (_HID, "RPI1016")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 Bluetooth UART")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x107D50C000, 0x107D50C01F, 0x20)
+    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 308 }
+  })
+}
+
+Device (I2CA) {
+  Name (_HID, "RPI1018")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 I2C controller 10")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x107D005600, 0x107D00561F, 0x20)
+    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 149 }
+  })
+}
+
+Device (SPIA) {
+  Name (_HID, "RPI1019")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 SPI controller 10 (boot EEPROM)")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x107D004000, 0x107D0041FF, 0x200)
+    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 150 }
+  })
+}
+
+Device (USB0) {
+  Name (_HID, "RPI101A")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 USB 2.0 OTG controller (USB-C)")
+  Name (_STA, 0x0F)
+  Name (_CCA, 0)
+
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x1000480000, 0x100048FFFF, 0x10000)
+    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 105 }
+  })
+}
+
+Device (GIO0) {
+  Name (_HID, "RPI1020")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 GPIO and pin control")
+  Name (_CCA, 0)
+  Method (_STA, 0, NotSerialized) {
+    If ((SREV == 0) || (SREV == 1)) {
+      Return (0x0F)
+    }
+    Return (0)
+  }
+
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      QWORDMEMORY_BUF (00, ResourceConsumer)
+      QWORDMEMORY_BUF (01, ResourceConsumer)
+      QWORDMEMORY_BUF (02, ResourceConsumer)
+      Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 276 }
+    })
+    Local0 = 0x30
+    If (SREV == 1) {
+      Local0 = 0x20
+    }
+    QWORD_SET (00, 0x107D508500, 0x40, 0)
+    QWORD_SET (01, 0x107D504100, Local0, 0)
+    QWORD_SET (02, 0x107D508400, 0x10, 0)
+    Return (RBUF)
+  }
+}
+
+Device (GIO1) {
+  Name (_HID, "RPI1020")
+  Name (_UID, 1)
+  Name (_DDN, "BCM2712 always-on GPIO and pin control")
+  Name (_CCA, 0)
+  Method (_STA, 0, NotSerialized) {
+    If ((SREV == 0) || (SREV == 1)) {
+      Return (0x0F)
+    }
+    Return (0)
+  }
+
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      QWORDMEMORY_BUF (00, ResourceConsumer)
+      QWORDMEMORY_BUF (01, ResourceConsumer)
+    })
+    Local0 = 0x20
+    If (SREV == 1) {
+      Local0 = 0x1C
+    }
+    QWORD_SET (00, 0x107D517C00, 0x40, 0)
+    QWORD_SET (01, 0x107D510700, Local0, 0)
+    Return (RBUF)
+  }
+}
+
+// Keep the Bluetooth radio in the system scope so its identity does not
+// depend on a driver enumerating children of the UART. The UART and shutdown
+// line are real SPB/GPIO connections; no transport or GPIO driver is supplied.
+Device (BTH0) {
+  Name (_HID, "RPI1017")
+  Name (_UID, 0)
+  Name (_DDN, "CYW43455 Bluetooth radio")
+  Method (_STA, 0, NotSerialized) {
+    Return (\_SB.GIO0._STA ())
+  }
+  Name (_CRS, ResourceTemplate () {
+    UartSerialBusV2 (115200, DataBitsEight, StopBitsOne, 0xFC,
+      LittleEndian, ParityTypeNone, FlowControlHardware,
+      16, 16, "\\_SB.BTU0", 0, ResourceConsumer, , Exclusive)
+    GpioIo (Exclusive, PullDefault, 0, 0, IoRestrictionOutputOnly,
+      "\\_SB.GIO0", 0, ResourceConsumer, , ) { 29 }
+  })
+}
+
+// The RTC is inside the PMIC and is accessed through firmware messages.
+// It has no independent CPU MMIO resource. EFI GetTime/SetTime remain in use.
+Device (RTC0) {
+  Name (_HID, "RPI101B")
+  Name (_UID, 0)
+  Name (_DDN, "Raspberry Pi 5 firmware RTC")
+  Name (_STA, 0x0F)
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      Package () { "raspberrypi,firmware", MBX0 }
+    }
+  })
+}

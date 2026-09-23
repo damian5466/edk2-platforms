@@ -104,6 +104,7 @@ typedef struct {
 typedef struct {
   UINT32 Width;
   UINT32 Height;
+  UINT32 PixelsPerScanLine;
 } GOP_MODE_DATA;
 
 STATIC UINT32 mBootWidth;
@@ -112,14 +113,13 @@ STATIC EFI_HANDLE mDevice;
 STATIC RASPBERRY_PI_FIRMWARE_PROTOCOL *mFwProtocol;
 STATIC EFI_CPU_ARCH_PROTOCOL *mCpu;
 
-STATIC UINTN mLastMode;
 STATIC GOP_MODE_DATA mGopModeTemplate[] = {
-  { 800,  600  }, /* Legacy */
-  { 640,  480  }, /* Legacy */
-  { 1024, 768  }, /* Legacy */
-  { 1280, 720  }, /* 720p */
-  { 1920, 1080 }, /* 1080p */
-  { 0,    0    }, /* Physical */
+  { 800,  600,  0 }, /* Legacy */
+  { 640,  480,  0 }, /* Legacy */
+  { 1024, 768,  0 }, /* Legacy */
+  { 1280, 720,  0 }, /* 720p */
+  { 1920, 1080, 0 }, /* 1080p */
+  { 0,    0,    0 }, /* Physical */
 };
 
 STATIC UINTN mLastMode;
@@ -195,7 +195,7 @@ DisplayQueryMode (
   (*Info)->PixelInformation.GreenMask = This->Mode->Info->PixelInformation.GreenMask;
   (*Info)->PixelInformation.BlueMask = This->Mode->Info->PixelInformation.BlueMask;
   (*Info)->PixelInformation.ReservedMask = This->Mode->Info->PixelInformation.ReservedMask;
-  (*Info)->PixelsPerScanLine = Mode->Width;
+  (*Info)->PixelsPerScanLine = Mode->PixelsPerScanLine;
 
   return EFI_SUCCESS;
 }
@@ -211,6 +211,7 @@ ClearScreen (
   Fill.Red = 0x00;
   Fill.Green = 0x00;
   Fill.Blue = 0x00;
+  Fill.Reserved = 0x00;
   This->Blt (This, &Fill, EfiBltVideoFill,
           0, 0, 0, 0, This->Mode->Info->HorizontalResolution,
           This->Mode->Info->VerticalResolution,
@@ -230,11 +231,13 @@ DisplaySetMode (
   UINTN FbPitch;
   EFI_STATUS Status;
   EFI_PHYSICAL_ADDRESS FbBase;
-  GOP_MODE_DATA *Mode = &mGopModeData[ModeNumber];
+  GOP_MODE_DATA *Mode;
 
- if (ModeNumber >= This->Mode->MaxMode) {
+  if (ModeNumber >= This->Mode->MaxMode) {
     return EFI_UNSUPPORTED;
   }
+
+  Mode = &mGopModeData[ModeNumber];
 
   DEBUG ((DEBUG_INFO, "Setting mode %u from %u: %u x %u\n",
     ModeNumber, This->Mode->Mode, Mode->Width, Mode->Height));
@@ -249,9 +252,14 @@ DisplaySetMode (
   DEBUG ((DEBUG_INFO, "Mode %u: %u x %u framebuffer is %u bytes at %p\n",
     ModeNumber, Mode->Width, Mode->Height, FbSize, FbBase));
 
-  if (FbPitch / PI3_BYTES_PER_PIXEL != Mode->Width) {
-    DEBUG ((DEBUG_ERROR, "Error: Expected width %u, got width %u\n",
-      Mode->Width, FbPitch / PI3_BYTES_PER_PIXEL));
+  if ((FbPitch % PI3_BYTES_PER_PIXEL != 0) ||
+      (FbPitch / PI3_BYTES_PER_PIXEL < Mode->Width) ||
+      (FbPitch / PI3_BYTES_PER_PIXEL > MAX_UINT32) ||
+      (Mode->Height == 0) || (FbPitch > FbSize / Mode->Height) ||
+      (FbBase == 0) || ((FbBase & EFI_PAGE_MASK) != 0) ||
+      (FbSize > MAX_UINTN - EFI_PAGE_MASK) ||
+      (FbBase > MAX_UINT64 - ALIGN_VALUE (FbSize, EFI_PAGE_SIZE))) {
+    DEBUG ((DEBUG_ERROR, "Invalid framebuffer layout for mode %u\n", ModeNumber));
     return EFI_DEVICE_ERROR;
   }
 
@@ -276,10 +284,11 @@ DisplaySetMode (
    * NOTE: Windows REQUIRES BGR in 32 or 24 bit format.
    */
   This->Mode->Info->PixelFormat = PixelBlueGreenRedReserved8BitPerColor;
-  This->Mode->Info->PixelsPerScanLine = Mode->Width;
+  Mode->PixelsPerScanLine = FbPitch / PI3_BYTES_PER_PIXEL;
+  This->Mode->Info->PixelsPerScanLine = Mode->PixelsPerScanLine;
   This->Mode->SizeOfInfo = sizeof (*This->Mode->Info);
   This->Mode->FrameBufferBase = FbBase;
-  This->Mode->FrameBufferSize = Mode->Width * Mode->Height * PI3_BYTES_PER_PIXEL;
+  This->Mode->FrameBufferSize = FbPitch * Mode->Height;
   DEBUG((DEBUG_INFO, "Reported Mode->FrameBufferSize is %u\n", This->Mode->FrameBufferSize));
 
   ClearScreen (This);
@@ -562,13 +571,18 @@ DriverStart (
     }
 
     //
-    // There is no way to communicate pitch back to OS. OS and even UEFI
-    // expect a fully linear frame buffer. So the width should
-    // be based on the frame buffer's pitch value. In some cases VC
-    // firmware would allocate ao frame buffer with some padding
-    // presumably to be 8 byte align.
+    // GOP describes row padding through PixelsPerScanLine. Keep the visible
+    // width unchanged so setting a mode does not request a different geometry.
     //
-    Mode->Width = FbPitch / PI3_BYTES_PER_PIXEL;
+    if ((FbPitch % PI3_BYTES_PER_PIXEL != 0) ||
+        (FbPitch / PI3_BYTES_PER_PIXEL < Mode->Width) ||
+        (FbPitch / PI3_BYTES_PER_PIXEL > MAX_UINT32) ||
+        (Mode->Height == 0) || (FbPitch > FbSize / Mode->Height)) {
+      Status = EFI_DEVICE_ERROR;
+      goto Done;
+    }
+
+    Mode->PixelsPerScanLine = FbPitch / PI3_BYTES_PER_PIXEL;
 
     DEBUG ((DEBUG_INFO, "Mode %u: %u x %u framebuffer is %u bytes at %p\n",
       Index, Mode->Width, Mode->Height, FbSize, FbBase));
@@ -580,7 +594,10 @@ DriverStart (
 
   // Both set the mode and initialize current mode information.
   gDisplayProto.Mode->MaxMode = mLastMode + 1;
-  DisplaySetMode (&gDisplayProto, 0);
+  Status = DisplaySetMode (&gDisplayProto, 0);
+  if (EFI_ERROR (Status)) {
+    goto Done;
+  }
 
   Status = gBS->InstallMultipleProtocolInterfaces (
     &Controller, &gEfiGraphicsOutputProtocolGuid,
@@ -598,12 +615,11 @@ DriverStart (
 Done:
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "Could not start DisplayDxe: %r\n", Status));
-    if (gDisplayProto.Mode->Info != NULL) {
-      FreePool (gDisplayProto.Mode->Info);
-      gDisplayProto.Mode->Info = NULL;
-    }
-
     if (gDisplayProto.Mode != NULL) {
+      if (gDisplayProto.Mode->Info != NULL) {
+        FreePool (gDisplayProto.Mode->Info);
+      }
+
       FreePool (gDisplayProto.Mode);
       gDisplayProto.Mode = NULL;
     }

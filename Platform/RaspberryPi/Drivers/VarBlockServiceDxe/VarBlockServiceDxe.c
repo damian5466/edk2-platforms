@@ -9,8 +9,7 @@
  **/
 
 #include "VarBlockService.h"
-
-#include <Protocol/ResetNotification.h>
+#include "FileNvram.h"
 
 //
 // Minimum delay to enact before reset, when variables are dirty (in μs).
@@ -53,8 +52,6 @@ InstallProtocolInterfaces (
                     &FvbDevice->FwVolBlockInstance,
                     &gEfiDevicePathProtocolGuid,
                     FvbDevice->DevicePath,
-                    &gEdkiiNvVarStoreFormattedGuid,
-                    NULL,
                     NULL
                   );
     ASSERT_EFI_ERROR (Status);
@@ -109,7 +106,8 @@ FvbVirtualAddressChangeEvent (
 --*/
 {
   EfiConvertPointer (0x0, (VOID**)&mFvInstance->FvBase);
-  EfiConvertPointer (0x0, (VOID**)&mFvInstance->VolumeHeader);
+  // FvBase and VolumeHeader are aliases in a union: convert only once.
+  if (FeaturePcdGet (PcdNvramFileEnable)) FileNvramVirtualAddressChange ();
   EfiConvertPointer (0x0, (VOID**)&mFvInstance);
 }
 
@@ -141,6 +139,7 @@ DoDump (
   )
 {
   EFI_STATUS Status;
+  EFI_STATUS CloseStatus;
   EFI_FILE_PROTOCOL *File;
 
   Status = FileOpen (Device,
@@ -152,23 +151,34 @@ DoDump (
     return Status;
   }
 
-  Status = FileWrite (File,
-             mFvInstance->Offset,
-             mFvInstance->FvBase,
-             mFvInstance->FvLength);
-  FileClose (File);
-  return Status;
+  Status = ValidateStoreFile (File);
+  if (!EFI_ERROR (Status)) {
+    Status = FileWrite (File,
+               mFvInstance->Offset,
+               mFvInstance->FvBase,
+               mFvInstance->FvLength);
+  }
+  CloseStatus = FileClose (File);
+  return EFI_ERROR (Status) ? Status : CloseStatus;
 }
 
 
 STATIC
 VOID
+EFIAPI
 DumpVars (
-  VOID
+  IN EFI_EVENT Event,
+  IN VOID *Context
   )
 {
   EFI_STATUS Status;
   RETURN_STATUS PcdStatus;
+
+  if (FeaturePcdGet (PcdNvramFileEnable)) {
+    Status = FileNvramSave ();
+    if (!EFI_ERROR (Status)) mFvInstance->Dirty = FALSE;
+    return;
+  }
 
   if (mFvInstance->Device == NULL) {
     DEBUG ((DEBUG_INFO, "Variable store not found?\n"));
@@ -182,8 +192,7 @@ DumpVars (
 
   Status = DoDump (mFvInstance->Device);
   if (EFI_ERROR (Status)) {
-    DEBUG ((DEBUG_ERROR, "Couldn't dump '%s'\n", mFvInstance->MappedFile));
-    ASSERT_EFI_ERROR (Status);
+    DEBUG ((DEBUG_ERROR, "Couldn't dump '%s': %r; will retry\n", mFvInstance->MappedFile, Status));
     return;
   }
 
@@ -202,29 +211,6 @@ DumpVars (
   mFvInstance->Dirty = FALSE;
 }
 
-STATIC
-VOID
-EFIAPI
-DumpVarsOnEvent (
-  IN EFI_EVENT Event,
-  IN VOID *Context
-  )
-{
-  DumpVars ();
-}
-
-STATIC
-VOID
-EFIAPI
-DumpVarsOnReset (
-  IN EFI_RESET_TYPE  ResetType,
-  IN EFI_STATUS      ResetStatus,
-  IN UINTN           DataSize,
-  IN VOID            *ResetData OPTIONAL
-  )
-{
-  DumpVars ();
-}
 
 VOID
 ReadyToBootHandler (
@@ -239,7 +225,7 @@ ReadyToBootHandler (
   Status = gBS->CreateEvent (
                   EVT_NOTIFY_SIGNAL,
                   TPL_CALLBACK,
-                  DumpVarsOnEvent,
+                  DumpVars,
                   NULL,
                   &ImageInstallEvent
                 );
@@ -252,7 +238,7 @@ ReadyToBootHandler (
                 );
   ASSERT_EFI_ERROR (Status);
 
-  DumpVars ();
+  DumpVars (NULL, NULL);
   Status = gBS->CloseEvent (Event);
   ASSERT_EFI_ERROR (Status);
 }
@@ -263,9 +249,19 @@ InstallDumpVarEventHandlers (
   VOID
   )
 {
-  EFI_STATUS                       Status;
-  EFI_EVENT                        ReadyToBootEvent;
-  EFI_RESET_NOTIFICATION_PROTOCOL  *ResetNotify;
+  EFI_STATUS Status;
+  EFI_EVENT ResetEvent;
+  EFI_EVENT ReadyToBootEvent;
+
+  Status = gBS->CreateEventEx (
+                  EVT_NOTIFY_SIGNAL,
+                  TPL_CALLBACK,
+                  DumpVars,
+                  NULL,
+                  &gRaspberryPiEventResetGuid,
+                  &ResetEvent
+                );
+  ASSERT_EFI_ERROR (Status);
 
   Status = gBS->CreateEventEx (
                   EVT_NOTIFY_SIGNAL,
@@ -276,20 +272,6 @@ InstallDumpVarEventHandlers (
                   &ReadyToBootEvent
                 );
   ASSERT_EFI_ERROR (Status);
-
-  Status = gBS->LocateProtocol (
-                  &gEfiResetNotificationProtocolGuid,
-                  NULL,
-                  (VOID **)&ResetNotify
-                  );
-  ASSERT_EFI_ERROR (Status);
-  if (!EFI_ERROR (Status)) {
-    Status = ResetNotify->RegisterResetNotify (
-                            ResetNotify,
-                            DumpVarsOnReset
-                            );
-    ASSERT_EFI_ERROR (Status);
-  }
 }
 
 
@@ -304,6 +286,10 @@ OnSimpleFileSystemInstall (
   UINTN HandleSize;
   EFI_HANDLE Handle;
   EFI_DEVICE_PATH_PROTOCOL *Device;
+
+  // File mode discovers all candidates together at ReadyToBoot/reset, so
+  // cloned volumes cannot be selected according to driver-dispatch order.
+  if (FeaturePcdGet (PcdNvramFileEnable)) return;
 
   if ((mFvInstance->Device != NULL) &&
       !EFI_ERROR (CheckStoreExists (mFvInstance->Device))) {
@@ -326,8 +312,10 @@ OnSimpleFileSystemInstall (
     if (Status == EFI_NOT_FOUND) {
       break;
     }
-
-    ASSERT_EFI_ERROR (Status);
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "Variable store notification: %r\n", Status));
+      break;
+    }
 
     Status = CheckStore (Handle, &Device);
     if (EFI_ERROR (Status)) {
@@ -336,8 +324,8 @@ OnSimpleFileSystemInstall (
 
     Status = DoDump (Device);
     if (EFI_ERROR (Status)) {
-      DEBUG ((DEBUG_ERROR, "Couldn't update '%s'\n", mFvInstance->MappedFile));
-      ASSERT_EFI_ERROR (Status);
+      DEBUG ((DEBUG_ERROR, "Couldn't update '%s': %r\n", mFvInstance->MappedFile, Status));
+      gBS->FreePool (Device);
       continue;
     }
 

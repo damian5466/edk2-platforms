@@ -21,11 +21,11 @@
 [Packages]
   MdePkg/MdePkg.dec
   MdeModulePkg/MdeModulePkg.dec
+  UefiCpuPkg/UefiCpuPkg.dec
   EmbeddedPkg/EmbeddedPkg.dec
   ArmPkg/ArmPkg.dec
   ArmPlatformPkg/ArmPlatformPkg.dec
   Platform/RaspberryPi/RaspberryPi.dec
-  UefiCpuPkg/UefiCpuPkg.dec
 
 [LibraryClasses]
   DebugLib

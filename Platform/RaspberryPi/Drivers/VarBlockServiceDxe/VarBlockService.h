@@ -10,6 +10,7 @@
 #ifndef _FW_BLOCK_SERVICE_H
 #define _FW_BLOCK_SERVICE_H
 
+#include <PiDxe.h>
 #include <Guid/EventGroup.h>
 #include <Library/DebugLib.h>
 #include <Library/DevicePathLib.h>
@@ -30,6 +31,10 @@ typedef struct {
   UINTN                      FvLength;
   UINTN                      Offset;
   UINTN                      NumOfBlocks;
+  // Keep geometry and access state outside the erasable FV header. FTW erases
+  // block zero while reclaiming the store, before restoring its header.
+  UINTN                      BlockSize;
+  EFI_FVB_ATTRIBUTES_2        Attributes;
   EFI_DEVICE_PATH_PROTOCOL   *Device;
   CHAR16                     *MappedFile;
   BOOLEAN                    Dirty;
@@ -203,9 +208,14 @@ FileOpen (
   IN  UINT64 OpenMode
   );
 
-VOID
+EFI_STATUS
 FileClose (
   IN  EFI_FILE_PROTOCOL *File
+  );
+
+EFI_STATUS
+ValidateStoreFile (
+  IN EFI_FILE_PROTOCOL *File
   );
 
 #endif
