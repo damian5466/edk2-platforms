@@ -218,6 +218,8 @@ DefinitionBlock ("Dsdt.aml", "DSDT", 2, "RPIFDN", "RPI5    ", 4)
       Include ("Rp1Services.asi")
     }
 
+    Include ("Rp1Header.asi")
+
     //
     // Broadcom STB SDHCI controllers (Arasan IP)
     //

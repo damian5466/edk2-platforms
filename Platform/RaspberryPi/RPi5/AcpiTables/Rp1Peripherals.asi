@@ -80,6 +80,7 @@ Device (ETH0) {
 
 Device (GPI0) {
   RP1_DEVICE_INFO ("RPI0002", 0x0, "RP1 GPIO and pin control")
+  Name (_DEP, Package () { \_SB.RP1B.IRQ0 })
 
   Method (_CRS, 0, Serialized) {
     Name (RBUF, ResourceTemplate () {
@@ -120,17 +121,30 @@ Device (CLK0) {
 RP1_SIMPLE_DEVICE (DMA0, "RPI0004", 0x0,
   "RP1 AXI DMA controller", RP1_DMA_BASE, 0x1000, 0x28)
 
-RP1_SIMPLE_DEVICE (I2C0, "RPI0005", 0x0,
-  "RP1 I2C controller 0", RP1_I2C0_BASE, 0x1000, 0x7)
+// SpbCx owns the header mux while a target is open. Other I2C instances
+// are board-internal and intentionally retain their original binding.
+#define RP1_HEADER_I2C(Dev, Uid, Offset, Irq, Sda, Scl) \
+  Device (Dev) {                                               \
+    RP1_DEVICE_INFO ("RPI0005", Uid, "RP1 header I2C controller") \
+    Name (_CID, "RPI0050")                                    \
+    Name (_DEP, Package () { \_SB.RP1B.IRQ0, \_SB.RP1B.CLK0, \_SB.RP1B.GPI0 }) \
+    Method (_CRS, 0, Serialized) {                             \
+      Name (RBUF, ResourceTemplate () {                        \
+        RP1_QWORDMEMORY_BUF (00)                               \
+        RP1_INTERRUPT_BUF (99)                                 \
+        PinFunction (Exclusive, PullUp, 3, "\\_SB.RP1B.GPI0", 0, ResourceConsumer,,) { Sda, Scl } \
+      })                                                       \
+      RP1_QWORDMEMORY_SET (00, Offset, 0x1000)                  \
+      RP1_INTERRUPT_SET (99)                                   \
+      Return (RBUF)                                           \
+    }                                                          \
+    RP1_DEVICE_IRQ (Irq)                                       \
+  }
 
-RP1_SIMPLE_DEVICE (I2C1, "RPI0005", 0x1,
-  "RP1 I2C controller 1", RP1_I2C1_BASE, 0x1000, 0x8)
-
-RP1_SIMPLE_DEVICE (I2C2, "RPI0005", 0x2,
-  "RP1 I2C controller 2", RP1_I2C2_BASE, 0x1000, 0x9)
-
-RP1_SIMPLE_DEVICE (I2C3, "RPI0005", 0x3,
-  "RP1 I2C controller 3", RP1_I2C3_BASE, 0x1000, 0xA)
+RP1_HEADER_I2C (I2C0, 0, RP1_I2C0_BASE, 0x7, 8, 9)
+RP1_HEADER_I2C (I2C1, 1, RP1_I2C1_BASE, 0x8, 2, 3)
+RP1_HEADER_I2C (I2C2, 2, RP1_I2C2_BASE, 0x9, 4, 5)
+RP1_HEADER_I2C (I2C3, 3, RP1_I2C3_BASE, 0xA, 6, 7)
 
 RP1_SIMPLE_DEVICE (I2C4, "RPI0005", 0x4,
   "RP1 I2C controller 4", RP1_I2C4_BASE, 0x1000, 0xB)
@@ -141,8 +155,25 @@ RP1_SIMPLE_DEVICE (I2C5, "RPI0005", 0x5,
 RP1_SIMPLE_DEVICE (I2C6, "RPI0005", 0x6,
   "RP1 I2C controller 6", RP1_I2C6_BASE, 0x1000, 0xD)
 
-RP1_SIMPLE_DEVICE (SPI0, "RPI0006", 0x0,
-  "RP1 SPI controller 0", RP1_SPI0_BASE, 0x130, 0x13)
+// GPIO-managed chip selects remain asserted across FIFO refill gaps.
+Device (SPI0) {
+  RP1_DEVICE_INFO ("RPI0006", 0, "RP1 header SPI0 controller")
+  Name (_CID, "RPI0060")
+  Name (_DEP, Package () { \_SB.RP1B.IRQ0, \_SB.RP1B.CLK0, \_SB.RP1B.GPI0 })
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      RP1_QWORDMEMORY_BUF (00)
+      RP1_INTERRUPT_BUF (99)
+      PinFunction (Exclusive, PullNone, 0, "\\_SB.RP1B.GPI0", 0, ResourceConsumer,,) { 9, 10, 11 }
+      GpioIo (Exclusive, PullUp, 0, 0, IoRestrictionOutputOnly, "\\_SB.RP1B.GPI0", 0, ResourceConsumer,,) { 8 }
+      GpioIo (Exclusive, PullUp, 0, 0, IoRestrictionOutputOnly, "\\_SB.RP1B.GPI0", 0, ResourceConsumer,,) { 7 }
+    })
+    RP1_QWORDMEMORY_SET (00, RP1_SPI0_BASE, 0x130)
+    RP1_INTERRUPT_SET (99)
+    Return (RBUF)
+  }
+  RP1_DEVICE_IRQ (0x13)
+}
 
 RP1_SIMPLE_DEVICE (SPI1, "RPI0006", 0x1,
   "RP1 SPI controller 1", RP1_SPI1_BASE, 0x130, 0x14)
@@ -168,20 +199,43 @@ RP1_SIMPLE_DEVICE (SPI7, "RPI0006", 0x7,
 RP1_SIMPLE_DEVICE (SPI8, "RPI0006", 0x8,
   "RP1 SPI controller 8", RP1_SPI8_BASE, 0x130, 0x38)
 
-RP1_SIMPLE_DEVICE (URT0, "RPI0007", 0x0,
-  "RP1 UART 0", RP1_UART0_BASE, 0x100, 0x19)
+// Only header routes are offered to the serial class extension. GPIO0/1
+// remain reserved for HAT identification; UART5 serves board-internal pins.
+// No mux is changed at boot. SerCx2 claims TX/RX only while the port is open.
+#define RP1_HEADER_UART(Dev, Uid, Offset, Irq, Friendly, Function, Tx, Rx) \
+  Device (Dev) {                                               \
+    RP1_DEVICE_INFO ("RPI0007", Uid, Friendly)                  \
+    Name (_CID, "RPI0070")                                    \
+    Name (_DEP, Package () { \_SB.RP1B.IRQ0, \_SB.RP1B.CLK0, \_SB.RP1B.GPI0 }) \
+    Method (_CRS, 0, Serialized) {                             \
+      Name (RBUF, ResourceTemplate () {                        \
+        RP1_QWORDMEMORY_BUF (00)                               \
+        RP1_INTERRUPT_BUF (99)                                 \
+        PinFunction (Exclusive, PullUp, Function, "\\_SB.RP1B.GPI0", 0, ResourceConsumer,,) { Tx, Rx } \
+      })                                                       \
+      RP1_QWORDMEMORY_SET (00, Offset, 0x100)                   \
+      RP1_INTERRUPT_SET (99)                                   \
+      Return (RBUF)                                           \
+    }                                                          \
+    Name (_DSD, Package () {                                   \
+      ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),           \
+      Package () {                                            \
+        RP1_IRQ_PROPERTIES (Irq),                             \
+        Package () { "SerCx-FriendlyName", Friendly }         \
+      }                                                        \
+    })                                                         \
+  }
+
+RP1_HEADER_UART (URT0, 0, RP1_UART0_BASE, 0x19, "UART0", 4, 14, 15)
 
 RP1_SIMPLE_DEVICE (URT1, "RPI0007", 0x1,
   "RP1 UART 1", RP1_UART1_BASE, 0x100, 0x2A)
 
-RP1_SIMPLE_DEVICE (URT2, "RPI0007", 0x2,
-  "RP1 UART 2", RP1_UART2_BASE, 0x100, 0x2B)
+RP1_HEADER_UART (URT2, 2, RP1_UART2_BASE, 0x2B, "UART2", 2, 4, 5)
 
-RP1_SIMPLE_DEVICE (URT3, "RPI0007", 0x3,
-  "RP1 UART 3", RP1_UART3_BASE, 0x100, 0x2C)
+RP1_HEADER_UART (URT3, 3, RP1_UART3_BASE, 0x2C, "UART3", 2, 8, 9)
 
-RP1_SIMPLE_DEVICE (URT4, "RPI0007", 0x4,
-  "RP1 UART 4", RP1_UART4_BASE, 0x100, 0x2D)
+RP1_HEADER_UART (URT4, 4, RP1_UART4_BASE, 0x2D, "UART4", 2, 12, 13)
 
 RP1_SIMPLE_DEVICE (URT5, "RPI0007", 0x5,
   "RP1 UART 5", RP1_UART5_BASE, 0x100, 0x2E)
