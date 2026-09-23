@@ -8,8 +8,10 @@ memory descriptions, and bootloader-applied overlays. Native Windows drivers
 bind to the existing project HIDs and consume this contract through Acpi.sys.
 
 This is a firmware interface for implementing those drivers. It does not make
-Windows consume Linux bindings automatically. GPIO, clock, reset, DMA, mailbox,
-IOMMU, media and board-service drivers still need implementations. ACPI resource
+Windows consume Linux bindings automatically. Initial RP1 GPIO, clock, UART,
+I²C and SPI implementations are in the matching Windows driver repository.
+Reset, DMA, mailbox, IOMMU, media and board-service drivers still need
+implementations. ACPI resource
 and PnP behavior on a physical Pi must be tested in addition to compilation and
 ACPICA execution. Arbitrary overlay endpoints require a native bus/platform
 driver to enumerate children from the connection graph, or an appropriate
@@ -148,6 +150,43 @@ Ethernet PHY is address 1 with active-low reset and 5 ms pulse. A board-service
 driver must coordinate resets with each function driver, including the current
 polling Ethernet driver. Fan GPIO45/channel3 and its 50 MHz clock handoff must
 be retained while `RPI00F1` is advertised. Do not claim those pins independently.
+
+## Windows 40-pin header
+
+`RHPX` (`RPI1050`, compatible `MSFT8000`) exposes Resource Hub Proxy resources.
+The first 52 descriptors are adjacent shared GPIO I/O and edge/active-both
+interrupt pairs for GPIO2–27, in GPIO order. GPIO0/1 remain reserved. GPIO pin
+numbers in this interface are native RP1 GPIO numbers, not header positions.
+I²C descriptors 52–55 are I²C1/0/2/3 respectively, with placeholder address
+0xFFFF and speed zero. I²C1 is therefore the default. SPI descriptors 56/57 are
+SPI0 CS0/CS1, 8-bit modes 0–3 at 100 kHz–4 MHz. Runtime connection settings come
+from Windows applications; these descriptors do not enable pins at boot.
+
+Header UART0/2/3/4 retain HID `RPI0007` and gain compatible ID `RPI0070`.
+Each `_CRS` has its existing 0x100-byte register resource, the shared GIC IRQ,
+and one exclusive `PinFunction` resource. TX/RX routes are GPIO14/15 at function
+4, GPIO4/5 at function 2, GPIO8/9 at function 2, and GPIO12/13 at function 2.
+`SerCx-FriendlyName` publishes UART0/2/3/4 serial-interface names. UART1's HAT
+pins and UART5's internal pins receive no header compatible ID.
+
+Header I²C0–3 retain HID `RPI0005` and gain compatible ID `RPI0050`. Each has
+its 0x1000-byte resource, shared IRQ and exclusive pull-up `PinFunction` 3:
+SDA/SCL GPIO8/9, 2/3, 4/5 and 6/7. I²C4–6 remain unmodified internal instances.
+
+SPI0 retains HID `RPI0006` and gains compatible ID `RPI0060`. Its 0x130-byte
+register resource and shared IRQ are followed by `PinFunction` 0 for GPIO9/10/11
+(MISO/MOSI/SCLK), then two exclusive pull-up/output-only `GpioIo` connections
+for GPIO8 and GPIO7 (CS0 and CS1). The driver opens only the selected CS
+connection when a target opens. GPIO-managed CS keeps the target selected
+through FIFO refill gaps. No other SPI instance receives the compatible ID.
+
+GpioClx owns mux arbitration; SerCx2 and SpbCx claim/release function connections
+with target lifetime. Header drivers lease their local interrupt route through
+the RP1 interrupt provider and acquire the shared clock provider. These
+kernel-client APIs are defined in the Windows repository's `common` headers.
+The complete provider set must be installed for all RHPX resources to resolve.
+The graph remains descriptive data; it cannot authorize a driver to bypass
+pin ownership or assume arbitrary alternate routes are usable.
 
 FADT declares a control-method power button. `PNP0C0C` uses GIO0 `_AEI`: GPIO20, falling edge,
 50 ms debounce. GIO0 `_EVT(20)` sends Notify `0x80`. It requires a functioning

@@ -1,0 +1,69 @@
+/** @file
+ * Windows user-mode access to the RP1 40-pin header.
+ * SPDX-License-Identifier: BSD-2-Clause-Patent
+ */
+
+// Native GPIO numbering; GPIO0/1 remain reserved for HAT identification.
+// Resource Hub Proxy requires adjacent shared IO/interrupt pairs in pin order.
+#define RP1_HEADER_GPIO(Pin, Pull) \
+  GpioIo (Shared, Pull, 0, 0, IoRestrictionNone, "\\_SB.RP1B.GPI0", 0, ResourceConsumer,,) { Pin } \
+  GpioInt (Edge, ActiveBoth, Shared, Pull, 0, "\\_SB.RP1B.GPI0",) { Pin }
+
+Device (RHPX) {
+  Name (_HID, "RPI1050")
+  Name (_CID, "MSFT8000")
+  Name (_UID, 1)
+  Name (_DDN, "Raspberry Pi 5 40-pin header")
+  Method (_STA) { Return (\_SB.RP1B._STA ()) }
+  Name (_CRS, ResourceTemplate () {
+    RP1_HEADER_GPIO (2, PullUp)
+    RP1_HEADER_GPIO (3, PullUp)
+    RP1_HEADER_GPIO (4, PullUp)
+    RP1_HEADER_GPIO (5, PullUp)
+    RP1_HEADER_GPIO (6, PullUp)
+    RP1_HEADER_GPIO (7, PullUp)
+    RP1_HEADER_GPIO (8, PullUp)
+    RP1_HEADER_GPIO (9, PullDown)
+    RP1_HEADER_GPIO (10, PullDown)
+    RP1_HEADER_GPIO (11, PullDown)
+    RP1_HEADER_GPIO (12, PullDown)
+    RP1_HEADER_GPIO (13, PullDown)
+    RP1_HEADER_GPIO (14, PullDown)
+    RP1_HEADER_GPIO (15, PullDown)
+    RP1_HEADER_GPIO (16, PullDown)
+    RP1_HEADER_GPIO (17, PullDown)
+    RP1_HEADER_GPIO (18, PullDown)
+    RP1_HEADER_GPIO (19, PullDown)
+    RP1_HEADER_GPIO (20, PullDown)
+    RP1_HEADER_GPIO (21, PullDown)
+    RP1_HEADER_GPIO (22, PullDown)
+    RP1_HEADER_GPIO (23, PullDown)
+    RP1_HEADER_GPIO (24, PullDown)
+    RP1_HEADER_GPIO (25, PullDown)
+    RP1_HEADER_GPIO (26, PullDown)
+    RP1_HEADER_GPIO (27, PullDown)
+    // First I2C resource is the default bus: physical pins 3/5.
+    I2cSerialBus (0xFFFF,, 0,, "\\_SB.RP1B.I2C1",,,)
+    I2cSerialBus (0xFFFF,, 0,, "\\_SB.RP1B.I2C0",,,)
+    I2cSerialBus (0xFFFF,, 0,, "\\_SB.RP1B.I2C2",,,)
+    I2cSerialBus (0xFFFF,, 0,, "\\_SB.RP1B.I2C3",,,)
+    SpiSerialBus (0, PolarityLow, FourWireMode, 0,, 0, ClockPolarityLow, ClockPhaseFirst, "\\_SB.RP1B.SPI0",,,)
+    SpiSerialBus (1, PolarityLow, FourWireMode, 0,, 0, ClockPolarityLow, ClockPhaseFirst, "\\_SB.RP1B.SPI0",,,)
+  })
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      Package () { "GPIO-PinCount", 28 },
+      Package () { "GPIO-UseDescriptorPinNumbers", 1 },
+      Package () { "GPIO-SupportedDriveModes", 0x0F },
+      Package () { "bus-I2C-I2C1", Package () { 52 } },
+      Package () { "bus-I2C-I2C0", Package () { 53 } },
+      Package () { "bus-I2C-I2C2", Package () { 54 } },
+      Package () { "bus-I2C-I2C3", Package () { 55 } },
+      Package () { "bus-SPI-SPI0", Package () { 56, 57 } },
+      Package () { "SPI0-MinClockInHz", 100000 },
+      Package () { "SPI0-MaxClockInHz", 4000000 },
+      Package () { "SPI0-SupportedDataBitLengths", Package () { 8 } }
+    }
+  })
+}
