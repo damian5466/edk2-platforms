@@ -246,13 +246,22 @@ Scope (GIO1) {
 
 Device (BORD) {
   RPI_SERVICE_INFO ("RPI1025", "Raspberry Pi board regulators and LEDs")
+  Name (_HRV, 2) // Seven independently leased GPIO connections.
   Name (_CRS, ResourceTemplate () {
-    GpioIo (Exclusive, PullDefault, 0, 0, IoRestrictionOutputOnly,
+    GpioIo (Exclusive, PullUp, 0, 0, IoRestrictionOutputOnly,
       "\\_SB.GIO0", 0, ResourceConsumer, , ) { 28 }
-    GpioIo (Exclusive, PullDefault, 0, 0, IoRestrictionOutputOnly,
-      "\\_SB.GIO1", 0, ResourceConsumer, , ) { 4, 9 }
-    GpioIo (Exclusive, PullDefault, 0, 0, IoRestrictionOutputOnly,
-      "\\_SB.RP1B.GPI0", 0, ResourceConsumer, , ) { 32, 34, 44, 46 }
+    GpioIo (Exclusive, PullUp, 0, 0, IoRestrictionOutputOnly,
+      "\\_SB.GIO1", 0, ResourceConsumer, , ) { 4 }
+    GpioIo (Exclusive, PullUp, 0, 0, IoRestrictionOutputOnly,
+      "\\_SB.GIO1", 0, ResourceConsumer, , ) { 9 }
+    GpioIo (Exclusive, PullUp, 0, 0, IoRestrictionOutputOnly,
+      "\\_SB.RP1B.GPI0", 0, ResourceConsumer, , ) { 32 }
+    GpioIo (Exclusive, PullDown, 0, 0, IoRestrictionOutputOnly,
+      "\\_SB.RP1B.GPI0", 0, ResourceConsumer, , ) { 34 }
+    GpioIo (Exclusive, PullUp, 0, 0, IoRestrictionOutputOnly,
+      "\\_SB.RP1B.GPI0", 0, ResourceConsumer, , ) { 44 }
+    GpioIo (Exclusive, PullDown, 0, 0, IoRestrictionOutputOnly,
+      "\\_SB.RP1B.GPI0", 0, ResourceConsumer, , ) { 46 }
   })
 }
 
