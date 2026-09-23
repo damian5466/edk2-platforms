@@ -1,0 +1,71 @@
+/** @file
+ * RP1 shared services. SPDX-License-Identifier: BSD-2-Clause-Patent
+ **/
+
+Device (IRQ0) {
+  RP1_DEVICE_INFO ("RPI0011", 0, "RP1 interrupt routing and system information")
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      RP1_QWORDMEMORY_BUF (00)
+      RP1_QWORDMEMORY_BUF (01)
+      BCM2712_MMIO (0x1000120000, 0x100012930F, 0x9310)
+      BCM2712_MMIO (0x1000130000, 0x10001300BF, 0xC0)
+      RP1_INTERRUPT_BUF (99)
+    })
+    RP1_QWORDMEMORY_SET (00, 0x108000, 0x1000)
+    RP1_QWORDMEMORY_SET (01, 0x000000, 0x4000)
+    RP1_INTERRUPT_SET (99)
+    Return (RBUF)
+  }
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      Package () { "raspberrypi,platform-description", "\\_SB.DGRF" },
+      Package () { "raspberrypi,interrupt-count", 61 },
+      // USB 0 and 1 primary interrupts remain managed by firmware/inbox xHCI.
+      Package () { "raspberrypi,reserved-interrupts", Package () { 31, 36 } },
+      Package () { "raspberrypi,interrupt-mode", "shared-inta" }
+    }
+  })
+}
+
+Device (SRAM) {
+  Name (_HID, "RPI0012")
+  Name (_UID, 0)
+  Name (_DDN, "RP1 SRAM and firmware shared memory")
+  Name (_CCA, 0)
+  Method (_STA) {
+    If ((SBAR == 0) || (SBAR == ACPI_PATCH_QWORD_VALUE)) { Return (0) }
+    Return (\_SB.RP1B._STA ())
+  }
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () { QWORDMEMORY_BUF (00, ResourceConsumer) })
+    QWORD_SET (00, SBAR, 0x10000, 0)
+    Return (RBUF)
+  }
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      Package () { "raspberrypi,platform-description", "\\_SB.DGRF" },
+      Package () { "raspberrypi,firmware-shmem-offset", 0xFF00 },
+      Package () { "raspberrypi,firmware-shmem-size", 0x100 },
+      Package () { "raspberrypi,allocatable-sram-size", 0 },
+      Package () { "raspberrypi,firmware", "\\_SB.RP1B.MBX1" }
+    }
+  })
+}
+
+Device (RST1) {
+  RP1_DEVICE_INFO ("RPI0013", 0, "RP1 peripheral reset controller")
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () { RP1_QWORDMEMORY_BUF (00) })
+    RP1_QWORDMEMORY_SET (00, RP1_RESETS_BASE, 0x4000)
+    Return (RBUF)
+  }
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      Package () { "raspberrypi,platform-description", "\\_SB.DGRF" }
+    }
+  })
+}

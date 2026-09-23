@@ -1,0 +1,107 @@
+/** SPDX-License-Identifier: BSD-2-Clause-Patent
+ * The graph supplies per-instance clock/reset/DMA/pin/endpoint specifiers.
+ * These properties identify the resource-owning providers for native drivers.
+ **/
+#define RPI_GRAPH_PROPERTIES                                    \
+  Package () { "raspberrypi,contract-version", 1 },              \
+  Package () { "raspberrypi,platform-description", "\\_SB.DGRF" }
+
+#define BCM_METADATA(Dev)                                       \
+  Scope (Dev) {                                               \
+    Method (_HRV) { Return (\_SB.SREV) }                        \
+    Name (_DSD, Package () {                                   \
+      ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),          \
+      Package () { RPI_GRAPH_PROPERTIES }                      \
+    })                                                        \
+  }
+
+BCM_METADATA (GPU0)
+BCM_METADATA (HEVC)
+BCM_METADATA (PM00)
+BCM_METADATA (RNG0)
+BCM_METADATA (THM0)
+BCM_METADATA (BTU0)
+BCM_METADATA (BTH0)
+BCM_METADATA (I2CA)
+BCM_METADATA (SPIA)
+BCM_METADATA (USB0)
+BCM_METADATA (MBX0)
+BCM_METADATA (GIO0)
+
+Scope (GIO1) {
+  Method (_HRV) { Return (\_SB.SREV) }
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      RPI_GRAPH_PROPERTIES,
+      Package () { "raspberrypi,bank0-data-access", "acpi-dsm" },
+      Package () { "raspberrypi,reserved-output-mask", 8 }
+    }
+  })
+}
+Scope (DISP) {
+  Method (_HRV) { Return (\_SB.SREV) }
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      RPI_GRAPH_PROPERTIES,
+      Package () { "raspberrypi,iommu", Package () { "\\_SB.MMU0", 4 } },
+      Package () { "raspberrypi,clocks", "\\_SB.FCLK" },
+      Package () { "raspberrypi,dma-controller", "\\_SB.DMA0" }
+    }
+  })
+}
+Scope (ISP0) {
+  Method (_HRV) { Return (\_SB.SREV) }
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      RPI_GRAPH_PROPERTIES,
+      Package () { "raspberrypi,iommu", Package () { "\\_SB.MMU0", 2 } },
+      Package () { "raspberrypi,iova-address-bits", 32 }
+    }
+  })
+}
+Scope (MMU0) {
+  Method (_HRV) { Return (\_SB.SREV) }
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      RPI_GRAPH_PROPERTIES,
+      Package () { "reg-names", Package () { "iommu2", "iommu4", "iommu5", "cache" } }
+    }
+  })
+}
+Scope (DMA0) { Method (_HRV) { Return (\_SB.SREV) } }
+
+Scope (RP1B) {
+  Method (_HRV) { Return (CHIP) }
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      RPI_GRAPH_PROPERTIES,
+      Package () { "raspberrypi,interrupt-controller", "\\_SB.RP1B.IRQ0" },
+      Package () { "raspberrypi,dma-address-bits", 36 },
+      // Firmware programs an identity PCI inbound window, unlike Linux DT.
+      Package () { "raspberrypi,dma-translation", 0 },
+      Package () { "raspberrypi,peripheral-dma-base", 0xC040000000 }
+    }
+  })
+}
+Scope (RP1B.CLK0) {
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () { RPI_GRAPH_PROPERTIES }
+  })
+}
+
+Scope (SDC1.WLAN) {
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      RPI_GRAPH_PROPERTIES,
+      Package () { "raspberrypi,power-provider", "\\_SB.BORD" },
+      Package () { "startup-delay-us", 150000 }
+    }
+  })
+}

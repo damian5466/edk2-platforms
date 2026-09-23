@@ -10,7 +10,6 @@
 // Included directly in \\_SB. These AXI masters must not inherit SOCB's
 // legacy 1 GiB DMA translation. Addresses are CPU physical, not VPU bus aliases.
 // HIDs are project-local enumeration IDs; no Pi 3/4 or generic driver CIDs.
-// No new _INI, power transition, reset, clock or interrupt-enable methods.
 //
 // SPI values in the Raspberry Pi DT are converted to GIC GSIs by adding 32.
 // Cascaded display interrupts are described by their parent GIC lines together
@@ -114,21 +113,53 @@ Device (DMA0) {
   Name (_HID, "RPI1010")
   Name (_UID, 0)
   Name (_DDN, "BCM2712 DMA controllers")
-  Name (_STA, 0x0F)
+  Method (_STA) {
+    If ((DMAL == ACPI_PATCH_WORD_VALUE) || (DMAL == 0)) { Return (0) }
+    Return (0x0F)
+  }
   Name (_CCA, 0)
   // Firmware reserves channels: drivers must honor the DT channel masks.
-  Name (_DSD, Package () {
-    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
-    Package () {
-      Package () { "brcm,dma-channel-mask", 0x0FF5 }
+  Name (DM32, ACPI_PATCH_WORD_VALUE)
+  Name (DM40, ACPI_PATCH_WORD_VALUE)
+  Name (DMAL, ACPI_PATCH_WORD_VALUE)
+  Method (_DSD, 0, Serialized) {
+    Local0 = Package () {
+      Package () { "brcm,dma-channel-mask", 0 },
+      Package () { "raspberrypi,dma32-channel-mask", 0 },
+      Package () { "raspberrypi,dma40-channel-mask", 0 },
+      Package () { "raspberrypi,dma40-channel-base", 6 },
+      Package () { "raspberrypi,platform-description", "\\_SB.DGRF" }
     }
-  })
+    // Materialize integers: Windows returns named package references as paths.
+    DerefOf (Local0 [0]) [1] = DMAL
+    DerefOf (Local0 [1]) [1] = DM32
+    DerefOf (Local0 [2]) [1] = DM40
+    Local1 = Package () {
+      ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"), Package () {}
+    }
+    Local1 [1] = Local0
+    Return (Local1)
+  }
 
-  Name (_CRS, ResourceTemplate () {
-    BCM2712_MMIO (0x1000010000, 0x10000105FF, 0x600)
-    BCM2712_MMIO (0x1000010600, 0x1000010BFF, 0x600)
-    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123 }
-  })
+  Method (_CRS, 0, Serialized) {
+    Local0 = ResourceTemplate () {
+      BCM2712_MMIO (0x1000010000, 0x10000105FF, 0x600)
+      BCM2712_MMIO (0x1000010600, 0x1000010BFF, 0x600)
+    }
+    Name (IBUF, ResourceTemplate () {
+      Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive,,, IRES) { 0 }
+    })
+    CreateDWordField (IBUF, IRES._INT, INTR)
+    Local1 = 0
+    While (Local1 < 12) {
+      If ((DMAL >> Local1) & 1) {
+        INTR = 112 + Local1
+        ConcatenateResTemplate (Local0, IBUF, Local0)
+      }
+      Local1++
+    }
+    Return (Local0)
+  }
 }
 
 Device (MMU0) {
@@ -333,7 +364,7 @@ Device (RTC0) {
   Name (_DSD, Package () {
     ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
     Package () {
-      Package () { "raspberrypi,firmware", MBX0 }
+      Package () { "raspberrypi,firmware", "\\_SB.MBX0" }
     }
   })
 }

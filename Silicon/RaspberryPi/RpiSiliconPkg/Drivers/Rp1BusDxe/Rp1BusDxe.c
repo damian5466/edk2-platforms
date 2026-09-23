@@ -173,6 +173,39 @@ Rp1BusIsFanReady (IN RP1_BUS_PROTOCOL *This)
   return RP1_BUS_DATA_FROM_THIS (This)->FanActive;
 }
 
+STATIC UINT32 EFIAPI
+Rp1BusGetChipId (IN RP1_BUS_PROTOCOL *This)
+{
+  return RP1_BUS_DATA_FROM_THIS (This)->ChipId;
+}
+
+STATIC EFI_PHYSICAL_ADDRESS EFIAPI
+Rp1BusGetSramBase (IN RP1_BUS_PROTOCOL *This)
+{
+  EFI_ACPI_ADDRESS_SPACE_DESCRIPTOR *Desc;
+  EFI_PCI_IO_PROTOCOL *PciIo;
+  EFI_PHYSICAL_ADDRESS Base;
+  EFI_STATUS Status;
+
+  PciIo = RP1_BUS_DATA_FROM_THIS (This)->PciIo;
+  Desc = NULL;
+  Base = 0;
+  Status = PciIo->GetBarAttributes (PciIo, 2, NULL, (VOID **)&Desc);
+  if (!EFI_ERROR (Status) && (Desc != NULL) &&
+      (Desc->Desc == ACPI_ADDRESS_SPACE_DESCRIPTOR) &&
+      (Desc->Len == sizeof (*Desc) - 3) &&
+      (Desc->ResType == ACPI_ADDRESS_SPACE_TYPE_MEM) &&
+      (Desc->AddrLen >= SIZE_64KB) && (Desc->AddrRangeMin != 0) &&
+      ((Desc->AddrRangeMin & (SIZE_64KB - 1)) == 0) &&
+      (Desc->AddrRangeMin <= MAX_UINT64 - SIZE_64KB)) {
+    Base = Desc->AddrRangeMin;
+  }
+  if (Desc != NULL) {
+    FreePool (Desc);
+  }
+  return Base;
+}
+
 STATIC EFI_STATUS
 Rp1BusReleaseController (RP1_BUS_DATA *Data)
 {
@@ -321,6 +354,8 @@ Rp1BusDriverBindingStart (
   mRp1Controllers = Rp1Data;
   Rp1Data->Rp1Bus.GetPeripheralBase = Rp1BusGetPeripheralBase;
   Rp1Data->Rp1Bus.IsFanReady = Rp1BusIsFanReady;
+  Rp1Data->Rp1Bus.GetSramBase = Rp1BusGetSramBase;
+  Rp1Data->Rp1Bus.GetChipId = Rp1BusGetChipId;
   Rp1IoInitialize (Rp1Data);
 
   Status = PciIo->Attributes (PciIo, EfiPciIoAttributeOperationGet, 0,

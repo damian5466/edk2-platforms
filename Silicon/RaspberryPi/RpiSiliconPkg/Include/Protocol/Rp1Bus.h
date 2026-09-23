@@ -24,6 +24,9 @@ struct _RP1_BUS_PROTOCOL {
   RP1_BUS_GET_PERIPHERAL_BASE    GetPeripheralBase;
   // True only after positive board-fan detection and successful PWM setup.
   BOOLEAN (EFIAPI *IsFanReady)(IN RP1_BUS_PROTOCOL *This);
+  // BAR2 is independently allocated by the PCI bus driver.
+  RP1_BUS_GET_PERIPHERAL_BASE    GetSramBase;
+  UINT32 (EFIAPI *GetChipId)(IN RP1_BUS_PROTOCOL *This);
 };
 
 extern EFI_GUID  gRp1BusProtocolGuid;

@@ -28,6 +28,7 @@
 
 #include <IndustryStandard/Bcm2836Mbox.h>
 #include <IndustryStandard/RpiMbox.h>
+#include <IndustryStandard/RpiMailboxHandoff.h>
 
 #include <Protocol/RpiFirmware.h>
 #include <Guid/EventGroup.h>
@@ -45,6 +46,8 @@ STATIC VOID  *mDmaBufferMapping;
 STATIC UINTN mDmaBufferBusAddress;
 
 STATIC SPIN_LOCK mMailboxLock;
+STATIC RPI_MAILBOX_HANDOFF *mMailboxHandoff;
+STATIC EFI_PHYSICAL_ADDRESS mMailboxHandoffPhysical;
 
 STATIC
 BOOLEAN
@@ -97,7 +100,7 @@ MailboxWaitForStatusCleared (
 
 STATIC
 EFI_STATUS
-MailboxTransaction (
+MailboxTransactionInternal (
   IN    UINTN   Length,
   IN    UINTN   Channel,
   OUT   UINT32  *Result
@@ -164,6 +167,41 @@ MailboxTransaction (
   ArmDataSynchronizationBarrier ();
 
   return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+MailboxTransaction (
+  IN UINTN Length,
+  IN UINTN Channel,
+  OUT UINT32 *Result
+  )
+{
+  EFI_STATUS Status;
+
+  // Every caller already holds mMailboxLock. The OS never clears Request.
+  // If it observes Active == 0 after setting Request, either the last call
+  // has finished, or the next call will observe Request and perform no I/O.
+  mMailboxHandoff->Active = 1;
+  WriteBackDataCacheRange ((VOID *)&mMailboxHandoff->Active, sizeof (UINT32));
+  ArmDataSynchronizationBarrier ();
+  InvalidateDataCacheRange ((VOID *)&mMailboxHandoff->Request, sizeof (UINT32));
+  if (mMailboxHandoff->Request != 0) {
+    Status = EFI_UNSUPPORTED;
+  } else {
+    Status = MailboxTransactionInternal (Length, Channel, Result);
+    if (EFI_ERROR (Status)) {
+      // A timed-out request may still be in flight. Fail a later handoff
+      // closed instead of granting ownership of an unquiesced mailbox.
+      mMailboxHandoff->Fault = 1;
+      WriteBackDataCacheRange ((VOID *)&mMailboxHandoff->Fault, sizeof (UINT32));
+    }
+  }
+  ArmDataSynchronizationBarrier ();
+  mMailboxHandoff->Active = 0;
+  WriteBackDataCacheRange ((VOID *)&mMailboxHandoff->Active, sizeof (UINT32));
+  ArmDataSynchronizationBarrier ();
+  return Status;
 }
 
 #pragma pack(1)
@@ -1576,6 +1614,12 @@ STATIC EFI_STATUS EFIAPI RpiFirmwareGetEepromUpdateStatus (UINT32 Words[4]) {
   return Status;
 }
 
+STATIC EFI_PHYSICAL_ADDRESS EFIAPI
+RpiFirmwareGetMailboxHandoff (VOID)
+{
+  return mMailboxHandoffPhysical;
+}
+
 STATIC RASPBERRY_PI_FIRMWARE_PROTOCOL mRpiFirmwareProtocol = {
   RpiFirmwareSetPowerState,
   RpiFirmwareGetMacAddress,
@@ -1600,6 +1644,7 @@ STATIC RASPBERRY_PI_FIRMWARE_PROTOCOL mRpiFirmwareProtocol = {
   RpiFirmwareGetRtc,
   RpiFirmwareSetRtc,
   RpiFirmwareGetEepromUpdateStatus,
+  RpiFirmwareGetMailboxHandoff,
 };
 
 STATIC
@@ -1612,6 +1657,7 @@ RpiFirmwareVirtualAddressChangeNotify (
 {
   EfiConvertPointer (0x0, (VOID **)&mMboxBaseAddress);
   EfiConvertPointer (0x0, (VOID **)&mDmaBuffer);
+  EfiConvertPointer (0x0, (VOID **)&mMailboxHandoff);
   EfiConvertPointer (0x0, (VOID **)&mRpiFirmwareProtocol.GetRtc);
   EfiConvertPointer (0x0, (VOID **)&mRpiFirmwareProtocol.SetRtc);
 }
@@ -1666,15 +1712,20 @@ RpiFirmwareDxeInitialize (
   //
   ASSERT (!(mDmaBufferBusAddress & (BCM2836_MBOX_NUM_CHANNELS - 1)));
 
-  Status = gBS->InstallProtocolInterface (&ImageHandle,
-                  &gRaspberryPiFirmwareProtocolGuid, EFI_NATIVE_INTERFACE,
-                  &mRpiFirmwareProtocol);
+  // Normal ARM RAM supports EFI_MEMORY_WC (Normal Non-cacheable), but may
+  // reject EFI_MEMORY_UC (Device memory). Use the same allocator as the
+  // mailbox DMA buffer so the page gets supported uncached, non-executable
+  // attributes and remains part of the runtime memory map.
+  Status = DmaAllocateBuffer (EfiRuntimeServicesData, 1,
+                  (VOID **)&mMailboxHandoff);
   if (EFI_ERROR (Status)) {
-    DEBUG ((DEBUG_ERROR,
-      "%a: failed to install RPI firmware protocol (Status == %r)\n",
-      __func__, Status));
+    DEBUG ((DEBUG_ERROR, "%a: failed to allocate mailbox handoff: %r\n",
+            __func__, Status));
     goto UnmapBuffer;
   }
+  mMailboxHandoffPhysical = (EFI_PHYSICAL_ADDRESS)(UINTN)mMailboxHandoff;
+  ZeroMem (mMailboxHandoff, EFI_PAGE_SIZE);
+  ArmDataSynchronizationBarrier ();
 
   AlignedMboxAddress = mMboxBaseAddress & ~(EFI_PAGE_SIZE - 1);
 
@@ -1712,9 +1763,23 @@ RpiFirmwareDxeInitialize (
     goto UnmapBuffer;
   }
 
+  // Publish only after all runtime mappings and the conversion callback are
+  // ready. Failure cleanup must never free state behind a published protocol.
+  Status = gBS->InstallProtocolInterface (&ImageHandle,
+                  &gRaspberryPiFirmwareProtocolGuid, EFI_NATIVE_INTERFACE,
+                  &mRpiFirmwareProtocol);
+  if (EFI_ERROR (Status)) {
+    gBS->CloseEvent (VirtualAddressChangeEvent);
+    goto UnmapBuffer;
+  }
   return EFI_SUCCESS;
 
 UnmapBuffer:
+  if (mMailboxHandoffPhysical != 0) {
+    DmaFreeBuffer (1, mMailboxHandoff);
+    mMailboxHandoff = NULL;
+    mMailboxHandoffPhysical = 0;
+  }
   DmaUnmap (mDmaBufferMapping);
 FreeBuffer:
   DmaFreeBuffer (NUM_PAGES, mDmaBuffer);
