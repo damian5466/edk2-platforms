@@ -64,6 +64,7 @@
 Device (ETH0) {
   RP1_DEVICE_INFO ("RPI0001", 0x0, "RP1 Gigabit Ethernet (Cadence GEM)")
   Name (_CLS, Package () { 0x02, 0x00, 0x00 })
+  Name (_DEP, Package () { \_SB.RP1B.IRQ0 })
 
   Method (_CRS, 0, Serialized) {
     Name (RBUF, ResourceTemplate () {
