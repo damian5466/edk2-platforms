@@ -192,6 +192,8 @@ typedef struct {
   SET_RTC                SetRtc;
   // Boot-time only. Words: updater state, last error, SPI check, A/B enabled.
   EFI_STATUS (EFIAPI *GetEepromUpdateStatus) (OUT UINT32 Words[4]);
+  // Boot-time only: physical address of RPI_MAILBOX_HANDOFF runtime page.
+  EFI_PHYSICAL_ADDRESS (EFIAPI *GetMailboxHandoff) (VOID);
 } RASPBERRY_PI_FIRMWARE_PROTOCOL;
 
 extern EFI_GUID gRaspberryPiFirmwareProtocolGuid;

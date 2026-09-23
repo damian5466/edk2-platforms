@@ -19,6 +19,7 @@
   RpiPlatformDxeHii.uni
   RpiPlatformDxeHii.vfr
   ConfigTable.c
+  AcpiDeviceGraph.c
   PciMemory.c
   Rp1Handoff.c
   Peripherals.c
@@ -61,6 +62,8 @@
 
 [Protocols]
   gEfiAcpiSdtProtocolGuid                     ## CONSUMES
+  gEfiAcpiTableProtocolGuid                   ## CONSUMES
+  gRaspberryPiFirmwareProtocolGuid           ## CONSUMES
   gBrcmStbSdhciDeviceProtocolGuid             ## PRODUCES
   gRp1BusProtocolGuid                         ## CONSUMES
   gEfiPciIoProtocolGuid                       ## CONSUMES

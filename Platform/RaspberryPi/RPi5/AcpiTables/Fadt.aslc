@@ -59,7 +59,7 @@ EFI_ACPI_6_3_FIXED_ACPI_DESCRIPTION_TABLE Fadt = {
   EFI_ACPI_RESERVED_WORD,                                                   // UINT16     IaPcBootArch (Reserved on ARM)
   EFI_ACPI_RESERVED_BYTE,                                                   // UINT8      Reserved1
   EFI_ACPI_6_3_WBINVD | EFI_ACPI_6_3_SLP_BUTTON |                           // UINT32     Flags
-  EFI_ACPI_6_3_HW_REDUCED_ACPI,
+  EFI_ACPI_6_3_HW_REDUCED_ACPI | EFI_ACPI_6_3_PWR_BUTTON,                    // PWRB uses control-method events
   { 0, 0, 0, 0, 0 },                                                        // EFI_ACPI_6_3_GENERIC_ADDRESS_STRUCTURE  ResetReg
   0,                                                                        // UINT8      ResetValue
   EFI_ACPI_6_3_ARM_PSCI_COMPLIANT,                                          // UINT16     ArmBootArchFlags

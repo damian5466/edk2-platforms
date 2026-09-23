@@ -68,10 +68,19 @@ Device (RES0) {
 Name (SUPP, Zero) // PCI _OSC Support Field value
 Name (CTRL, Zero) // PCI _OSC Control Field value
 
-Method (_OSC, 4) {
+Method (_OSC, 4, Serialized) {
+  // The status DWORD is present even for an unrecognized UUID. Never create
+  // fields outside a caller's buffer (including a truncated probe).
+  If ((ObjectType (Arg3) != 3) || (SizeOf (Arg3) < 4)) {
+    Return (Buffer (4) { 0x02, 0, 0, 0 })
+  }
+  CreateDWordField (Arg3, 0, CDW1)
   If (Arg0 == ToUUID ("33DB4D5B-1FF7-401C-9657-7441C03DD766")) {
+    If ((Arg2 != 3) || (SizeOf (Arg3) < 12)) {
+      CDW1 |= 0x02
+      Return (Arg3)
+    }
     // Create DWord-adressable fields from the Capabilities Buffer
-    CreateDWordField (Arg3, 0, CDW1)
     CreateDWordField (Arg3, 4, CDW2)
     CreateDWordField (Arg3, 8, CDW3)
 

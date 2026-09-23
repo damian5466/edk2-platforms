@@ -9,6 +9,7 @@
 #include <Guid/EventGroup.h>
 #include <Guid/RpiPlatformFormSetGuid.h>
 #include <IndustryStandard/Acpi.h>
+#include <IndustryStandard/SerialPortConsoleRedirectionTable.h>
 #include <IndustryStandard/Pci.h>
 #include <IndustryStandard/PeImage.h>
 #include <Library/AcpiLib.h>
@@ -23,6 +24,7 @@
 #include <Library/UefiRuntimeServicesTableLib.h>
 #include <Protocol/AcpiSystemDescriptionTable.h>
 #include <Protocol/Rp1Bus.h>
+#include <Protocol/RpiFirmware.h>
 #include <RpiPlatformVarStoreData.h>
 #include <Rpi5McfgTable.h>
 #include <ConfigVars.h>
@@ -32,6 +34,7 @@
 #include "Peripherals.h"
 #include "PciMemory.h"
 #include "Rp1Handoff.h"
+#include "AcpiDeviceGraph.h"
 
 //
 // AcpiTables.inf
@@ -172,10 +175,26 @@ DsdtFixupSoc (
   VOID        *Fdt;
   UINTN       Revision;
   EFI_STATUS  Status;
+  INT32       Node;
+  INT32       Length;
+  CONST UINT32 *Interrupts;
+  UINT32      UartInterrupt;
+  UINT32      AonServices;
+  UINTN       Index;
+  CONST UINT32 *Regs;
+  CONST CHAR8 *DeviceStatus;
+  CONST CHAR8 *AonPaths[] = {
+    "/soc/pwm@7d517a80", "/soc/intc@7d517b00",
+    "/soc@107c000000/pwm@7d517a80", "/soc@107c000000/intc@7d517b00"
+  };
+  UINTN       TableIndex;
+  UINTN       TableKey;
+  EFI_ACPI_SERIAL_PORT_CONSOLE_REDIRECTION_TABLE *Spcr;
 
+  Revision = 0xAB;
   Fdt = FdtPlatformGetBase ();
   if (Fdt == NULL) {
-    return;
+    goto FixupUart;
   }
 
   if ((FdtNodeOffsetByCompatible (Fdt, -1, "brcm,bcm2712d0-pinctrl") >= 0) &&
@@ -188,7 +207,6 @@ DsdtFixupSoc (
     Revision = 0;
   } else {
     DEBUG ((DEBUG_WARN, "%a: Unknown pinctrl layout; ACPI GPIO devices hidden.\n", __func__));
-    return;
   }
 
   Status = AcpiAmlObjectUpdateInteger (
@@ -199,6 +217,69 @@ DsdtFixupSoc (
              );
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "%a: Failed to patch SREV. Status=%r\n", __func__, Status));
+  }
+
+FixupUart:
+  AonServices = 0;
+  if ((Fdt != NULL) && (Revision <= 1)) {
+    for (Index = 0; Index < ARRAY_SIZE (AonPaths); Index++) {
+      Node = FdtPathOffset (Fdt, AonPaths[Index]);
+      if ((Node < 0) || (FdtStringListSearch (Fdt, Node, "compatible",
+          (Index & 1) ? "brcm,bcm7271-l2-intc" : "brcm,bcm7038-pwm") < 0)) {
+        continue;
+      }
+      DeviceStatus = FdtGetProp (Fdt, Node, "status", &Length);
+      if ((DeviceStatus != NULL) &&
+          !((Length == 5 && CompareMem (DeviceStatus, "okay", 5) == 0) ||
+            (Length == 3 && CompareMem (DeviceStatus, "ok", 3) == 0))) {
+        continue;
+      }
+      Regs = FdtGetProp (Fdt, Node, "reg", &Length);
+      if ((Regs == NULL) || (Length != 2 * sizeof (UINT32)) ||
+          (Fdt32ToCpu (Regs[0]) != ((Index & 1) ? 0x7D517B00 : 0x7D517A80)) ||
+          (Fdt32ToCpu (Regs[1]) != ((Index & 1) ? 0x10 : 0x28))) {
+        continue;
+      }
+      if (Index & 1) {
+        Interrupts = FdtGetProp (Fdt, Node, "interrupts", &Length);
+        if ((Interrupts == NULL) || (Length != 3 * sizeof (UINT32)) ||
+            (Fdt32ToCpu (Interrupts[0]) != 0) ||
+            (Fdt32ToCpu (Interrupts[1]) != 243) ||
+            (Fdt32ToCpu (Interrupts[2]) != 4)) {
+          continue;
+        }
+      }
+      AonServices |= 1U << (Index & 1);
+    }
+  }
+  Status = AcpiAmlObjectUpdateInteger (AcpiSdtProtocol, TableHandle,
+             "\\_SB.AONS", AonServices);
+  ASSERT_EFI_ERROR (Status);
+  UartInterrupt = (Revision == 1) ? 152 : 153;
+  if (Fdt != NULL) {
+    Node = FdtPathOffset (Fdt, "/soc@107c000000/serial@7d001000");
+    if (Node < 0) {
+      Node = FdtPathOffset (Fdt, "/soc/serial@7d001000");
+    }
+    Interrupts = FdtGetProp (Fdt, Node, "interrupts", &Length);
+    if ((Interrupts != NULL) && (Length == 3 * sizeof (UINT32)) &&
+        (Fdt32ToCpu (Interrupts[0]) == 0) &&
+        (Fdt32ToCpu (Interrupts[2]) == 4) &&
+        (Fdt32ToCpu (Interrupts[1]) < 988)) {
+      UartInterrupt = Fdt32ToCpu (Interrupts[1]) + 32;
+    }
+  }
+  // Use a DWORD patch slot: a future DT can select a GSI above 255.
+  Status = AcpiAmlObjectUpdateInteger (AcpiSdtProtocol, TableHandle,
+             "\\_SB.SOCB.URT0.UINR", UartInterrupt);
+  ASSERT_EFI_ERROR (Status);
+  TableIndex = 0;
+  Status = AcpiLocateTableBySignature (AcpiSdtProtocol,
+             EFI_ACPI_6_4_SERIAL_PORT_CONSOLE_REDIRECTION_TABLE_SIGNATURE,
+             &TableIndex, (EFI_ACPI_DESCRIPTION_HEADER **)&Spcr, &TableKey);
+  if (!EFI_ERROR (Status)) {
+    Spcr->GlobalSystemInterrupt = UartInterrupt;
+    AcpiUpdateChecksum ((UINT8 *)Spcr, Spcr->Header.Length);
   }
 }
 
@@ -211,6 +292,27 @@ DsdtFixupSd (
   )
 {
   EFI_STATUS Status;
+  VOID *Fdt;
+  CONST UINT32 *Regs;
+  INT32 Node;
+  INT32 Length;
+  UINTN Pads;
+
+  Pads = 0;
+  Fdt = FdtPlatformGetBase ();
+  if (Fdt != NULL) {
+    Node = FdtPathOffset (Fdt, "/axi/mmc@fff000");
+    Regs = FdtGetProp (Fdt, Node, "reg", &Length);
+    if ((Regs != NULL) && (Length == 16 * sizeof (UINT32)) &&
+        (Fdt32ToCpu (Regs[8]) == 0x10) && (Fdt32ToCpu (Regs[9]) == 0x015040B0) &&
+        (Fdt32ToCpu (Regs[10]) == 0) && (Fdt32ToCpu (Regs[11]) == 4) &&
+        (Fdt32ToCpu (Regs[12]) == 0x10) && (Fdt32ToCpu (Regs[13]) == 0x015200F0) &&
+        (Fdt32ToCpu (Regs[14]) == 0) && (Fdt32ToCpu (Regs[15]) == 0x24)) {
+      Pads = 1;
+    }
+  }
+  Status = AcpiAmlObjectUpdateInteger (AcpiSdtProtocol, TableHandle, "\\_SB.SDX0.SDPD", Pads);
+  ASSERT_EFI_ERROR (Status);
 
   Status = AcpiAmlObjectUpdateInteger (AcpiSdtProtocol, TableHandle,
                 "\\_SB.SDCM", AcpiSdCompatMode.Value);
@@ -223,6 +325,55 @@ DsdtFixupSd (
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "%a: Failed to patch AcpiSdLimitUhs.\n", __func__));
   }
+}
+
+STATIC VOID
+DsdtFixupMailbox (EFI_ACPI_SDT_PROTOCOL *AcpiSdtProtocol, EFI_ACPI_HANDLE TableHandle)
+{
+  RASPBERRY_PI_FIRMWARE_PROTOCOL *Firmware;
+  EFI_STATUS Status;
+
+  Status = gBS->LocateProtocol (&gRaspberryPiFirmwareProtocolGuid, NULL, (VOID **)&Firmware);
+  if (!EFI_ERROR (Status)) {
+    Status = AcpiAmlObjectUpdateInteger (AcpiSdtProtocol, TableHandle,
+               "\\_SB.MBX0.MBST", Firmware->GetMailboxHandoff ());
+  }
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "%a: Mailbox handoff unavailable: %r\n", __func__, Status));
+  }
+}
+
+STATIC VOID
+DsdtFixupDma (EFI_ACPI_SDT_PROTOCOL *AcpiSdtProtocol, EFI_ACPI_HANDLE TableHandle)
+{
+  VOID *Fdt;
+  CONST UINT32 *Property;
+  INT32 Node;
+  INT32 Length;
+  UINTN Index;
+  UINT32 Mask;
+  UINT32 AllChannels;
+  EFI_STATUS Status;
+  CONST CHAR8 *Paths[] = { "/axi/dma@10000", "/axi/dma@10600" };
+  CHAR8 *Names[] = { "\\_SB.DMA0.DM32", "\\_SB.DMA0.DM40" };
+
+  Fdt = FdtPlatformGetBase ();
+  AllChannels = 0;
+  for (Index = 0; Index < ARRAY_SIZE (Paths); Index++) {
+    Mask = 0; // No usable channel unless the firmware DT assigns it to the OS.
+    if (Fdt != NULL) {
+      Node = FdtPathOffset (Fdt, Paths[Index]);
+      Property = FdtGetProp (Fdt, Node, "brcm,dma-channel-mask", &Length);
+      if ((Property != NULL) && (Length == sizeof (UINT32))) {
+        Mask = Fdt32ToCpu (*Property) & ((Index == 0) ? 0x3F : 0xFC0);
+      }
+    }
+    Status = AcpiAmlObjectUpdateInteger (AcpiSdtProtocol, TableHandle, Names[Index], Mask);
+    ASSERT_EFI_ERROR (Status);
+    AllChannels |= Mask;
+  }
+  Status = AcpiAmlObjectUpdateInteger (AcpiSdtProtocol, TableHandle, "\\_SB.DMA0.DMAL", AllChannels);
+  ASSERT_EFI_ERROR (Status);
 }
 
 STATIC
@@ -289,6 +440,12 @@ DsdtFixupRp1 (
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "%a: Failed to patch PBAR. Status=%r\n", __func__, Status));
   }
+  Status = AcpiAmlObjectUpdateInteger (AcpiSdtProtocol, TableHandle,
+             "\\_SB.RP1B.SBAR", Rp1Bus->GetSramBase (Rp1Bus));
+  ASSERT_EFI_ERROR (Status);
+  Status = AcpiAmlObjectUpdateInteger (AcpiSdtProtocol, TableHandle,
+             "\\_SB.RP1B.CHIP", Rp1Bus->GetChipId (Rp1Bus));
+  ASSERT_EFI_ERROR (Status);
   Status = AcpiAmlObjectUpdateInteger (
              AcpiSdtProtocol,
              TableHandle,
@@ -593,11 +750,21 @@ InstallAcpiTables (
 
   DsdtFixupStatus (mAcpiSdtProtocol, TableHandle);
   DsdtFixupSoc (mAcpiSdtProtocol, TableHandle);
+  DsdtFixupMailbox (mAcpiSdtProtocol, TableHandle);
+  DsdtFixupDma (mAcpiSdtProtocol, TableHandle);
   DsdtFixupSd (mAcpiSdtProtocol, TableHandle);
   DsdtFixupRp1 (mAcpiSdtProtocol, TableHandle);
   DsdtFixupPcie (mAcpiSdtProtocol, TableHandle);
 
   mAcpiSdtProtocol->Close (TableHandle);
+
+  // This SSDT retains the complete boot DT wiring graph as ACPI data. _CRS
+  // remains authoritative for MMIO, interrupts and the firmware DMA mapping.
+  Status = InstallAcpiDeviceGraph ();
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "%a: Device graph installation failed: %r\n", __func__, Status));
+    return Status;
+  }
 
   return EFI_SUCCESS;
 }

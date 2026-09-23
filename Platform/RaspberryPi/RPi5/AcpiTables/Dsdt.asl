@@ -13,8 +13,9 @@
 
 #include "AcpiTables.h"
 
-DefinitionBlock ("Dsdt.aml", "DSDT", 2, "RPIFDN", "RPI5    ", 3)
+DefinitionBlock ("Dsdt.aml", "DSDT", 2, "RPIFDN", "RPI5    ", 4)
 {
+  External (\_SB.DGRF.NODS, PkgObj)
   Scope (\_SB_)
   {
     Device (CPU0) {
@@ -92,12 +93,16 @@ DefinitionBlock ("Dsdt.aml", "DSDT", 2, "RPIFDN", "RPI5    ", 3)
         Name (_HID, "ARMH0011")
         Name (_UID, 0x0)
         Name (_CCA, 0x0)
+        // Boot DT distinguishes the D0 SPI 120 from the C-stepping SPI 121.
+        Name (UINR, ACPI_PATCH_DWORD_VALUE)
 
         Method (_CRS, 0x0, Serialized) {
           Name (RBUF, ResourceTemplate () {
             QWORDMEMORY_BUF (00, ResourceConsumer)
-            Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { PL011_DEBUG_INTERRUPT }
+            Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive,,, UINT) { 0 }
           })
+          CreateDWordField (RBUF, UINT._INT, INTR)
+          INTR = UINR
           QWORD_SET (00, PL011_DEBUG_BASE_ADDRESS, PL011_DEBUG_LENGTH, 0)
           Return (RBUF)
         }
@@ -112,6 +117,7 @@ DefinitionBlock ("Dsdt.aml", "DSDT", 2, "RPIFDN", "RPI5    ", 3)
     } // Device (SOCB)
 
     Include ("Bcm2712Peripherals.asi")
+    Include ("PlatformServices.asi")
 
     //
     // PCIe Root Complexes
@@ -194,6 +200,8 @@ DefinitionBlock ("Dsdt.aml", "DSDT", 2, "RPIFDN", "RPI5    ", 3)
 
       // Firmware mapped BAR - patched by platform driver
       Name (PBAR, ACPI_PATCH_QWORD_VALUE)
+      Name (SBAR, ACPI_PATCH_QWORD_VALUE) // Independent PCI BAR2, never PBAR+4M
+      Name (CHIP, ACPI_PATCH_DWORD_VALUE)
 
       // Shared level interrupt - PCIE2 INTA# SPI
       Name (PINT, 261)
@@ -207,6 +215,7 @@ DefinitionBlock ("Dsdt.aml", "DSDT", 2, "RPIFDN", "RPI5    ", 3)
 
       Include ("Rp1.asi")
       Include ("Rp1Peripherals.asi")
+      Include ("Rp1Services.asi")
     }
 
     //
@@ -270,14 +279,8 @@ DefinitionBlock ("Dsdt.aml", "DSDT", 2, "RPIFDN", "RPI5    ", 3)
         Return (RBUF)
       }
 
-      OperationRegion (GPIO, SystemMemory, BCM2712_BRCMSTB_GIO_AON_BASE, BCM2712_BRCMSTB_GIO_AON_LENGTH)
-      Field (GPIO, DWordAcc, NoLock, Preserve) {
-        Offset (0x4),
-        DATA, 32,     // BIT3 = GPIO 3, 1.8v switch
-      }
-
       Method (_INI, 0, Serialized) {
-        DATA &= ~(1 << 3)
+        \_SB.GIO1.SDVL (0)
       }
 
       Method (_DSM, 4, Serialized) {
@@ -300,13 +303,13 @@ DefinitionBlock ("Dsdt.aml", "DSDT", 2, "RPIFDN", "RPI5    ", 3)
 
               // Function Index 3: Set 1.8v signalling
               Case (3) {
-                DATA |= (1 << 3)
+                \_SB.GIO1.SDVL (1)
                 Return (Buffer () { 0x00 })
               }
 
               // Function Index 4: Set 3.3v signalling
               Case (4) {
-                DATA &= ~(1 << 3)
+                \_SB.GIO1.SDVL (0)
                 Return (Buffer () { 0x00 })
               }
 
@@ -353,7 +356,9 @@ DefinitionBlock ("Dsdt.aml", "DSDT", 2, "RPIFDN", "RPI5    ", 3)
         Return (Package () {
           ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
           Package () {
-            Package () { "sdhci-caps-mask", CAPM }
+            Package () { "sdhci-caps-mask", CAPM },
+            Package () { "raspberrypi,configuration", "\\_SB.SDX0" },
+            Package () { "raspberrypi,platform-description", "\\_SB.DGRF" }
           }
         })
       } // _DSD
@@ -431,6 +436,8 @@ DefinitionBlock ("Dsdt.aml", "DSDT", 2, "RPIFDN", "RPI5    ", 3)
           Package () {
             // Disable hardware retuning, SDR104, SDR50.
             Package () { "sdhci-caps-mask", (1 << 47) | (1 << 46) | (1 << 33) | (1 << 32) },
+            Package () { "raspberrypi,configuration", "\\_SB.SDX1" },
+            Package () { "raspberrypi,platform-description", "\\_SB.DGRF" },
           }
         })
       } // _DSD
@@ -447,5 +454,6 @@ DefinitionBlock ("Dsdt.aml", "DSDT", 2, "RPIFDN", "RPI5    ", 3)
       }
     } // Device (SDC1)
 
+    Include ("HardwareMetadata.asi")
   } // Scope (\_SB_)
 } // DefinitionBlock

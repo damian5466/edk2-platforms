@@ -1,0 +1,358 @@
+/** @file
+ * SPDX-License-Identifier: BSD-2-Clause-Patent
+ **/
+
+// The platform driver installs NODS in a separate SSDT from the actual boot
+// DT, including overlays, phandles, pin groups and endpoint graphs. It is data,
+// not an alternative source of Windows MMIO/interrupt/DMA resources.
+Device (DGRF) {
+  Name (_HID, "RPI1040")
+  Name (_UID, 0)
+  Name (_DDN, "Raspberry Pi platform connection graph")
+  Method (_STA) {
+    If (CondRefOf (NODS)) { Return (0x0F) }
+    Return (0)
+  }
+  // Private, fixed PackageOp pages avoid static VarPackage initialization
+  // differences between Windows and ACPICA. The public node indices stay flat.
+  Method (GCNT, 1, NotSerialized) {
+    Local0 = SizeOf (Arg0)
+    If (Local0 == 0) { Return (0) }
+    // Acpi.sys rejects SizeOf (DerefOf (Index (...))) as an invalid SuperName.
+    Local1 = DerefOf (Arg0 [Local0 - 1])
+    Return (((Local0 - 1) * 128) + SizeOf (Local1))
+  }
+  Method (GENT, 2, NotSerialized) {
+    Local0 = DerefOf (Arg0 [Arg1 >> 7])
+    Return (DerefOf (Local0 [Arg1 & 127]))
+  }
+  Method (_DSM, 4, Serialized) {
+    If ((Arg0 != ToUUID ("a95b0d30-818e-4a96-a47b-726d07230501")) || (Arg1 != 1)) {
+      Return (Buffer () { 0 })
+    }
+    If (Arg2 == 0) { Return (Buffer () { 15 }) }
+    If (!CondRefOf (NODS)) { Return (Package () {}) }
+    If (Arg2 == 1) {
+      Local0 = Package () { 1, 0, 0 }
+      Local0 [1] = GCNT (NODS)
+      Local0 [2] = SREV
+      Return (Local0)
+    }
+    If ((Arg2 == 2) && (ObjectType (Arg3) == 4)) {
+      If (SizeOf (Arg3) == 1) {
+        Local0 = DerefOf (Arg3 [0])
+        If ((ObjectType (Local0) == 1) && (Local0 < GCNT (NODS))) {
+          Local1 = GENT (NODS, Local0)
+          Local2 = Package () { "", 0, "", 0 }
+          Local2 [0] = DerefOf (Local1 [0])
+          Local2 [1] = DerefOf (Local1 [1])
+          Local2 [2] = DerefOf (Local1 [2])
+          Local2 [3] = GCNT (DerefOf (Local1 [3]))
+          Return (Local2)
+        }
+      }
+    }
+    // ACPI_METHOD_ARGUMENT_V1.DataLength is only 16 bits on Windows. Return
+    // one property in bounded chunks, even for large overlay properties or
+    // a __symbols__ node with hundreds of entries.
+    If ((Arg2 == 3) && (ObjectType (Arg3) == 4)) {
+      If (SizeOf (Arg3) == 3) {
+        Local0 = DerefOf (Arg3 [0])
+        Local1 = DerefOf (Arg3 [1])
+        Local2 = DerefOf (Arg3 [2])
+        If ((ObjectType (Local0) == 1) && (ObjectType (Local1) == 1) && (ObjectType (Local2) == 1)) {
+          If (Local0 < GCNT (NODS)) {
+            Local3 = GENT (NODS, Local0)
+            Local4 = DerefOf (Local3 [3])
+            If (Local1 < GCNT (Local4)) {
+              Local4 = GENT (Local4, Local1)
+              Local5 = DerefOf (Local4 [1])
+              If (Local2 <= SizeOf (Local5)) {
+                // Acpi.sys omits empty buffers while retaining the package's
+                // element count. Integer zero is the explicit empty marker.
+                Local6 = Package () { "", 0, 0 }
+                Local6 [0] = DerefOf (Local4 [0])
+                Local6 [1] = SizeOf (Local5)
+                If (Local2 < SizeOf (Local5)) {
+                  Mid (Local5, Local2, 4096, Local7)
+                  Local6 [2] = Local7
+                }
+                Return (Local6)
+              }
+            }
+          }
+        }
+      }
+    }
+    Return (Package () {})
+  }
+}
+
+Scope (MBX0) {
+  Name (MBST, ACPI_PATCH_QWORD_VALUE)
+  OperationRegion (HREG, SystemMemory, MBST, 132)
+  Field (HREG, DWordAcc, NoLock, Preserve) {
+    RQST, 32,
+    Offset (64), ACTV, 32,
+    Offset (128), FLT0, 32
+  }
+  Method (_DSM, 4, Serialized) {
+    If ((Arg0 != ToUUID ("a95b0d30-818e-4a96-a47b-726d07230502")) || (Arg1 != 1)) {
+      Return (Buffer () { 0 })
+    }
+    If (Arg2 == 0) { Return (Buffer () { 7 }) }
+    If ((MBST == 0) || (MBST == ACPI_PATCH_QWORD_VALUE)) { Return (3) }
+    If (Arg2 == 1) {
+      Local0 = Package () { 1, 0, 0, 0 }
+      Local0 [1] = RQST
+      Local0 [2] = ACTV
+      Local0 [3] = FLT0
+      Return (Local0)
+    }
+    If (Arg2 == 2) {
+      If (FLT0 != 0) { Return (2) }
+      RQST = 1
+      Local0 = 1000
+      While ((ACTV != 0) && (Local0 != 0)) {
+        Sleep (1)
+        Local0--
+      }
+      If (ACTV != 0) { Return (1) }
+      If (FLT0 != 0) { Return (2) }
+      Return (0)
+    }
+    Return (Buffer () { 0 })
+  }
+}
+
+#define RPI_SERVICE_INFO(Id, Text)                              \
+  Name (_HID, Id)                                              \
+  Name (_UID, 0)                                               \
+  Name (_DDN, Text)                                            \
+  Name (_CCA, 0)                                               \
+  Name (_STA, 0x0F)                                            \
+  Name (_DSD, Package () {                                     \
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),            \
+    Package () {                                              \
+      Package () { "raspberrypi,platform-description", "\\_SB.DGRF" },  \
+      Package () { "raspberrypi,contract-version", 1 }          \
+    }                                                         \
+  })
+
+Device (RST0) {
+  RPI_SERVICE_INFO ("RPI1021", "BCM2712 reset and PCIe calibration provider")
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x1001504318, 0x1001504347, 0x30)
+    BCM2712_MMIO (0x1000119500, 0x100011950F, 0x10)
+  })
+}
+
+Device (SYS0) {
+  RPI_SERVICE_INFO ("RPI1022", "BCM2712 AXI arbitration and CPU interrupt control")
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x1000400018, 0x100040002F, 0x18)
+    BCM2712_MMIO (0x107D503000, 0x107D503017, 0x18)
+    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 270 }
+  })
+}
+
+// Separate companion devices preserve the inbox SD driver's resource order.
+// A native SD driver obtains these resources through the companion's driver.
+Device (SDX0) {
+  RPI_SERVICE_INFO ("RPI1023", "BCM2712 removable SD configuration")
+  Name (SDPD, ACPI_PATCH_BYTE_VALUE)
+  Method (_CRS, 0, Serialized) {
+    Local0 = ResourceTemplate () {
+      BCM2712_MMIO (0x1000FFF400, 0x1000FFF5FF, 0x200)
+    }
+    // Older boot DTs explicitly assign SD pin/pad controls. Do not assume
+    // their availability from the SoC stepping alone.
+    If (SDPD == 1) {
+      Local1 = ResourceTemplate () {
+        BCM2712_MMIO (0x10015040B0, 0x10015040B3, 4)
+        BCM2712_MMIO (0x10015200F0, 0x1001520113, 0x24)
+      }
+      ConcatenateResTemplate (Local0, Local1, Local0)
+    }
+    Return (Local0)
+  }
+}
+Device (SDX1) {
+  RPI_SERVICE_INFO ("RPI1024", "BCM2712 Wi-Fi SDIO configuration")
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x1001100400, 0x10011005FF, 0x200)
+  })
+}
+
+// The control-method power button becomes operational when a GpioClx driver
+// registers GIO0. Do not invent a direct GIC interrupt for GPIO 20.
+Device (PWRB) {
+  Name (_HID, EisaId ("PNP0C0C"))
+  Name (_UID, 0)
+  Method (_STA) { Return (\_SB.GIO0._STA ()) }
+}
+Scope (GIO0) {
+  Name (_AEI, ResourceTemplate () {
+    GpioInt (Edge, ActiveLow, Exclusive, PullDefault, 5000,
+      "\\_SB.GIO0", 0, ResourceConsumer, , ) { 20 }
+  })
+  Method (_EVT, 1, Serialized) {
+    If (Arg0 == 20) { Notify (\_SB.PWRB, 0x80) }
+  }
+}
+
+// AON bank 0 has no verified D0 interrupt route. Its DATA register is shared
+// with the boot-critical SD voltage method. All OS bank-0 DATA access goes
+// through this broker; other GPIO/pinctrl registers remain driver-owned.
+Scope (GIO1) {
+  Mutex (GLCK, 0)
+  OperationRegion (ADAT, SystemMemory, 0x107D517C04, 4)
+  Field (ADAT, DWordAcc, NoLock, Preserve) { GDAT, 32 }
+  Method (UPDT, 2, NotSerialized) {
+    Acquire (GLCK, 0xFFFF)
+    Local0 = GDAT
+    GDAT = (Local0 & ~Arg0) | (Arg1 & Arg0)
+    Local0 = GDAT
+    Release (GLCK)
+    Return (Local0)
+  }
+  Method (SDVL, 1, Serialized) {
+    UPDT (8, Arg0 << 3)
+    // DT regulator-settling-time-us = 5000.
+    Sleep (5)
+  }
+  Method (_DSM, 4, Serialized) {
+    If ((Arg0 != ToUUID ("a95b0d30-818e-4a96-a47b-726d07230503")) || (Arg1 != 1)) {
+      Return (Buffer () { 0 })
+    }
+    If (Arg2 == 0) { Return (Buffer () { 7 }) }
+    If (Arg2 == 1) { Return (UPDT (0, 0)) }
+    If ((Arg2 == 2) && (ObjectType (Arg3) == 4)) {
+      If (SizeOf (Arg3) == 2) {
+        Local0 = DerefOf (Arg3 [0])
+        Local1 = DerefOf (Arg3 [1])
+        If ((ObjectType (Local0) == 1) && (ObjectType (Local1) == 1)) {
+          Local2 = 0
+          If (SREV == 0) { Local2 = 0x1FFF7 }
+          If (SREV == 1) { Local2 = 0x07FF7 }
+          // SD voltage pin is exclusively controlled by SDC0._DSM.
+          If ((Local0 & ~Local2) == 0) { Return (UPDT (Local0, Local1)) }
+        }
+      }
+    }
+    Return (Ones)
+  }
+}
+
+Device (BORD) {
+  RPI_SERVICE_INFO ("RPI1025", "Raspberry Pi board regulators and LEDs")
+  Name (_CRS, ResourceTemplate () {
+    GpioIo (Exclusive, PullDefault, 0, 0, IoRestrictionOutputOnly,
+      "\\_SB.GIO0", 0, ResourceConsumer, , ) { 28 }
+    GpioIo (Exclusive, PullDefault, 0, 0, IoRestrictionOutputOnly,
+      "\\_SB.GIO1", 0, ResourceConsumer, , ) { 4, 9 }
+    GpioIo (Exclusive, PullDefault, 0, 0, IoRestrictionOutputOnly,
+      "\\_SB.RP1B.GPI0", 0, ResourceConsumer, , ) { 32, 34, 44, 46 }
+  })
+}
+
+Device (TIM0) {
+  RPI_SERVICE_INFO ("RPI1026", "BCM2712 system timer")
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x107C003000, 0x107C003FFF, 0x1000)
+    // Channels 0 and 2 belong to VideoCore firmware.
+    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 97, 99 }
+  })
+}
+Device (PERF) {
+  RPI_SERVICE_INFO ("RPI1027", "BCM2712 AXI performance counters")
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x107C012800, 0x107C0128FF, 0x100)
+    BCM2712_MMIO (0x107E000000, 0x107E0000FF, 0x100)
+  })
+}
+
+// These providers are present in the original board tree but absent from the
+// newer tree. Publish them only when the boot DT describes the exact hardware.
+// A presence bit is not permission to change firmware-owned pins or clocks.
+Name (AONS, ACPI_PATCH_BYTE_VALUE)
+Device (PWMA) {
+  Name (_HID, "RPI1029")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 always-on PWM")
+  Name (_CCA, 0)
+  Method (_HRV) { Return (SREV) }
+  Method (_STA) {
+    If ((AONS != ACPI_PATCH_BYTE_VALUE) && (AONS & 1)) { Return (0x0F) }
+    Return (0)
+  }
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x107D517A80, 0x107D517AA7, 0x28)
+  })
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () { Package () { "raspberrypi,platform-description", "\\_SB.DGRF" } }
+  })
+}
+Device (AONI) {
+  Name (_HID, "RPI102A")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 always-on BSC interrupt controller")
+  Name (_CCA, 0)
+  Method (_HRV) { Return (SREV) }
+  Method (_STA) {
+    If ((AONS != ACPI_PATCH_BYTE_VALUE) && (AONS & 2)) { Return (0x0F) }
+    Return (0)
+  }
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x107D517B00, 0x107D517B0F, 0x10)
+    Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 275 }
+  })
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () { Package () { "raspberrypi,platform-description", "\\_SB.DGRF" } }
+  })
+}
+
+// Firmware services have no additional MMIO. Their native drivers are clients
+// of the single MBX0 owner, including CPU/DVFS clocks, reset, power and RTC.
+#define RPI_FIRMWARE_SERVICE(Id, Text)                          \
+  Name (_HID, Id)                                              \
+  Name (_UID, 0)                                               \
+  Name (_DDN, Text)                                            \
+  Name (_STA, 0x0F)                                            \
+  Name (_DSD, Package () {                                     \
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),            \
+    Package () {                                              \
+      Package () { "raspberrypi,firmware", "\\_SB.MBX0" },              \
+      Package () { "raspberrypi,platform-description", "\\_SB.DGRF" }   \
+    }                                                         \
+  })
+Device (FCLK) { RPI_FIRMWARE_SERVICE ("RPI1030", "VideoCore firmware clocks") }
+Device (FRST) { RPI_FIRMWARE_SERVICE ("RPI1031", "VideoCore firmware resets") }
+Device (FPWR) { RPI_FIRMWARE_SERVICE ("RPI1032", "VideoCore firmware power domains") }
+
+// These resources permit a future platform/PCI driver to manage the native
+// host bridge. RES0 still owns the compatibility ECAM page at +0x8000.
+// MSI ranges are described in the graph, not falsely claimed as wired IRQs.
+Device (PCIE) {
+  Name (_HID, "RPI1028")
+  Name (_UID, 0)
+  Name (_DDN, "BCM2712 external PCIe host services")
+  Name (_CCA, 0)
+  Method (_STA) { Return (\_SB.PCI1._STA) }
+  Name (_DSD, Package () {
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+    Package () {
+      Package () { "raspberrypi,platform-description", "\\_SB.DGRF" },
+      Package () { "raspberrypi,root-bridge", "\\_SB.PCI1" },
+      Package () { "raspberrypi,config-max-bus", \_SB.PBMA },
+      Package () { "raspberrypi,contract-version", 1 }
+    }
+  })
+  Name (_CRS, ResourceTemplate () {
+    BCM2712_MMIO (0x1000110000, 0x1000117FFF, 0x8000)
+    BCM2712_MMIO (0x1000119000, 0x100011930F, 0x310)
+    BCM2712_MMIO (0x1000131000, 0x10001310BF, 0xC0)
+  })
+}

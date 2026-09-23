@@ -19,15 +19,30 @@
   Name (_UID, Uid)                                              \
   Name (_DDN, Description)                                     \
   Name (_CCA, 0)                                               \
+  Method (_HRV) { Return (\_SB.RP1B.CHIP) }                     \
   Method (_STA, 0, NotSerialized) {                            \
     Return (\_SB.RP1B._STA ())                                \
   }
 
+#define RP1_IRQ_PROPERTIES(Irq)                                \
+  Package () { "raspberrypi,rp1-interrupts", Package () { Irq } }, \
+  Package () { "raspberrypi,interrupt-controller", "\\_SB.RP1B.IRQ0" }, \
+  Package () { "raspberrypi,platform-description", "\\_SB.DGRF" }, \
+  Package () { "raspberrypi,contract-version", 1 }
+
 #define RP1_DEVICE_IRQ(Irq)                                    \
   Name (_DSD, Package () {                                      \
     ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),             \
-    Package () {                                               \
-      Package () { "raspberrypi,rp1-interrupts", Package () { Irq } } \
+    Package () { RP1_IRQ_PROPERTIES (Irq) }                     \
+  })
+
+#define RP1_VIDEO_IRQ(Irq)                                      \
+  Name (_DSD, Package () {                                     \
+    ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),            \
+    Package () {                                              \
+      RP1_IRQ_PROPERTIES (Irq),                                \
+      Package () { "raspberrypi,iommu", Package () { "\\_SB.MMU0", 5 } }, \
+      Package () { "raspberrypi,dma-iova-offset", 0x1000000000 } \
     }                                                          \
   })
 
@@ -83,7 +98,9 @@ Device (GPI0) {
   Name (_DSD, Package () {
     ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
     Package () {
-      Package () { "raspberrypi,rp1-interrupts", Package () { 0x0, 0x1, 0x2 } }
+      Package () { "raspberrypi,rp1-interrupts", Package () { 0x0, 0x1, 0x2 } },
+      Package () { "raspberrypi,interrupt-controller", "\\_SB.RP1B.IRQ0" },
+      Package () { "raspberrypi,platform-description", "\\_SB.DGRF" }
     }
   })
 }
@@ -270,7 +287,7 @@ Device (MIP0) {
     Return (RBUF)
   }
 
-  RP1_DEVICE_IRQ (0x2F)
+  RP1_VIDEO_IRQ (0x2F)
 }
 
 Device (MIP1) {
@@ -296,7 +313,7 @@ Device (MIP1) {
     Return (RBUF)
   }
 
-  RP1_DEVICE_IRQ (0x30)
+  RP1_VIDEO_IRQ (0x30)
 }
 
 Device (VID0) {
@@ -316,7 +333,7 @@ Device (VID0) {
     Return (RBUF)
   }
 
-  RP1_DEVICE_IRQ (0x31)
+  RP1_VIDEO_IRQ (0x31)
 }
 
 Device (PIO0) {
@@ -335,7 +352,11 @@ Device (PIO0) {
   Name (_DSD, Package () {
     ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
     Package () {
-      Package () { "raspberrypi,rp1-interrupts", Package () { 0x32, 0x33 } }
+      Package () { "raspberrypi,rp1-interrupts", Package () { 0x32, 0x33 } },
+      Package () { "raspberrypi,rp1-interrupt-flags", Package () { 1, 1 } },
+      Package () { "raspberrypi,interrupt-controller", "\\_SB.RP1B.IRQ0" },
+      Package () { "raspberrypi,firmware", "\\_SB.RP1B.MBX1" },
+      Package () { "raspberrypi,platform-description", "\\_SB.DGRF" }
     }
   })
 }
