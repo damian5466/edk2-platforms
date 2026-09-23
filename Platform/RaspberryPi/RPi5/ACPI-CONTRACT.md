@@ -142,14 +142,22 @@ These are cooperating provider interfaces, not independent permission for
 clients to reset shared hardware. Do not reset the RP1 bridge, clocks, embedded
 processors or firmware while xHCI, Ethernet, fan or another function is active.
 
-`BORD` GPIO resources are, in order: main GPIO 28 (Wi-Fi enable); AON GPIOs 4/9
-(SD power/activity LED); RP1 GPIOs 32/34/44/46 (Ethernet PHY reset, camera 0
-enable, power LED, camera 1 enable). Polarity, startup delays and regulator
-settings are in their graph records. Wi-Fi requires 150 ms startup delay; the
-Ethernet PHY is address 1 with active-low reset and 5 ms pulse. A board-service
-driver must coordinate resets with each function driver, including the current
-polling Ethernet driver. Fan GPIO45/channel3 and its 50 MHz clock handoff must
-be retained while `RPI00F1` is advertised. Do not claim those pins independently.
+`BORD` revision 2 (`_HRV = 2`) has seven separate, exclusive, output-only GPIO
+connections in this order: main GPIO28 (Wi-Fi enable), AON GPIO4 (SD power),
+AON GPIO9 (activity LED), RP1 GPIO32 (Ethernet PHY reset), RP1 GPIO34 (camera 0
+enable), RP1 GPIO44 (power LED), RP1 GPIO46 (camera 1 enable). Earlier firmware
+grouped these into three connections; a driver must check the revision and
+resource count before using the new indices. Independent connections let a
+client release an LED without releasing a supply or PHY reset line.
+
+Polarity, startup delays and regulator settings are in the graph records.
+LEDs and PHY reset are active-low; enables are active-high. Wi-Fi requires
+150 ms startup delay. The Ethernet PHY is address 1; its reset requires a
+5 ms pulse coordinated with the Ethernet driver. The board driver holds
+Wi-Fi/SD power and PHY reset deasserted, and does not offer an uncoordinated
+reset operation. RP1 GPIO support must cover the four named internal pins.
+Fan GPIO45/channel3 and its 50 MHz clock handoff must be retained while
+`RPI00F1` is advertised. Do not claim those pins independently.
 
 ## Windows 40-pin header
 
