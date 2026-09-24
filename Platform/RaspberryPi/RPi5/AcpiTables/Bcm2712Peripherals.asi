@@ -232,11 +232,23 @@ Device (BTU0) {
   Name (_DDN, "BCM2712 Bluetooth UART")
   Name (_STA, 0x0F)
   Name (_CCA, 0)
+  Name (_DEP, Package () { \_SB.GIO0 })
+  // Typed boot-DT metadata avoids traversing the full graph during PnP start.
+  Name (UCKH, ACPI_PATCH_DWORD_VALUE)
+  Method (UCLK, 0, NotSerialized) { Return (UCKH) }
 
-  Name (_CRS, ResourceTemplate () {
+  Name (RBUF, ResourceTemplate () {
     BCM2712_MMIO (0x107D50C000, 0x107D50C01F, 0x20)
     Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 308 }
+    PinFunction (Exclusive, PullDefault, 4, "\\_SB.GIO0", 0, ResourceConsumer, RTS0, ) { 24 }
+    PinFunction (Exclusive, PullDefault, 4, "\\_SB.GIO0", 0, ResourceConsumer, , ) { 25, 26, 27 }
   })
+  CreateWordField (RBUF, RTS0._FUN, RFUN)
+  Method (_CRS, 0, Serialized) {
+    // C0 routes RTS on function 3; D0 routes all four UART pins on 4.
+    If (SREV == 0) { RFUN = 3 } Else { RFUN = 4 }
+    Return (RBUF)
+  }
 }
 
 Device (I2CA) {
@@ -337,18 +349,25 @@ Device (GIO1) {
 
 // Keep the Bluetooth radio in the system scope so its identity does not
 // depend on a driver enumerating children of the UART. The UART and shutdown
-// line are real SPB/GPIO connections; no transport or GPIO driver is supplied.
+// line are real UART/GPIO connections for the native transport driver.
 Device (BTH0) {
   Name (_HID, "RPI1017")
   Name (_UID, 0)
   Name (_DDN, "CYW43455 Bluetooth radio")
+  Name (_DEP, Package () { \_SB.BTU0, \_SB.GIO0 })
+  Name (BADR, ACPI_PATCH_QWORD_VALUE)
+  Method (BMAC, 0, NotSerialized) {
+    If ((BADR == 0) || (BADR == ACPI_PATCH_QWORD_VALUE)) { Return (0) }
+    Local0 = ToBuffer (BADR)
+    Return (Mid (Local0, 0, 6))
+  }
   Method (_STA, 0, NotSerialized) {
     Return (\_SB.GIO0._STA ())
   }
   Name (_CRS, ResourceTemplate () {
-    UartSerialBusV2 (115200, DataBitsEight, StopBitsOne, 0xFC,
+    UartSerialBusV2 (115200, DataBitsEight, StopBitsOne, 0xC0,
       LittleEndian, ParityTypeNone, FlowControlHardware,
-      16, 16, "\\_SB.BTU0", 0, ResourceConsumer, , Exclusive)
+      32, 32, "\\_SB.BTU0", 0, ResourceConsumer, , Exclusive)
     GpioIo (Exclusive, PullDefault, 0, 0, IoRestrictionOutputOnly,
       "\\_SB.GIO0", 0, ResourceConsumer, , ) { 29 }
   })

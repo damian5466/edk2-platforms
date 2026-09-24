@@ -119,8 +119,20 @@ Device (CLK0) {
   }
 }
 
-RP1_SIMPLE_DEVICE (DMA0, "RPI0004", 0x0,
-  "RP1 AXI DMA controller", RP1_DMA_BASE, 0x1000, 0x28)
+Device (DMA0) {
+  RP1_DEVICE_INFO ("RPI0004", 0x0, "RP1 AXI DMA controller")
+  Name (_DEP, Package () { \_SB.RP1B.IRQ0, \_SB.RP1B.CLK0 })
+  Method (_CRS, 0, Serialized) {
+    Name (RBUF, ResourceTemplate () {
+      RP1_QWORDMEMORY_BUF (00)
+      RP1_INTERRUPT_BUF (99)
+    })
+    RP1_QWORDMEMORY_SET (00, RP1_DMA_BASE, 0x1000)
+    RP1_INTERRUPT_SET (99)
+    Return (RBUF)
+  }
+  RP1_DEVICE_IRQ (0x28)
+}
 
 // SpbCx owns the header mux while a target is open. Other I2C instances
 // are board-internal and intentionally retain their original binding.

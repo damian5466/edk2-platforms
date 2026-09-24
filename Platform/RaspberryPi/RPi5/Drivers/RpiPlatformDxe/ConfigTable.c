@@ -283,6 +283,59 @@ FixupUart:
   }
 }
 
+STATIC VOID
+DsdtFixupBluetooth (EFI_ACPI_SDT_PROTOCOL *AcpiSdtProtocol, EFI_ACPI_HANDLE TableHandle)
+{
+  VOID *Fdt;
+  CONST UINT32 *Property;
+  CONST UINT8 *Address;
+  INT32 Node;
+  INT32 Radio;
+  INT32 Length;
+  UINT32 Clock;
+  UINT64 BdAddress;
+  EFI_STATUS Status;
+
+  Clock = 0;
+  BdAddress = 0;
+  Fdt = FdtPlatformGetBase ();
+  if (Fdt != NULL) {
+    Node = FdtPathOffset (Fdt, "/soc@107c000000/serial@7d50c000");
+    if (Node < 0) {
+      Node = FdtPathOffset (Fdt, "/soc/serial@7d50c000");
+    }
+    if ((Node >= 0) &&
+        (FdtStringListSearch (Fdt, Node, "compatible", "brcm,bcm7271-uart") >= 0)) {
+      Property = FdtGetProp (Fdt, Node, "clock-frequency", &Length);
+      if ((Property != NULL) && (Length == sizeof (UINT32))) {
+        Clock = Fdt32ToCpu (*Property);
+        if ((Clock < 1000000) || (Clock > 500000000)) {
+          Clock = 0;
+        }
+      }
+      Radio = FdtSubnodeOffset (Fdt, Node, "bluetooth");
+      if (Radio >= 0) {
+        Address = FdtGetProp (Fdt, Radio, "local-bd-address", &Length);
+        if ((Address != NULL) && (Length == 6)) {
+          // The DT and HCI both use least-significant address byte first.
+          CopyMem (&BdAddress, Address, 6);
+          if (BdAddress == 0xFFFFFFFFFFFFULL) {
+            BdAddress = 0;
+          }
+        }
+      }
+    }
+  }
+  Status = AcpiAmlObjectUpdateInteger (AcpiSdtProtocol, TableHandle,
+             "\\_SB.BTU0.UCKH", Clock);
+  ASSERT_EFI_ERROR (Status);
+  Status = AcpiAmlObjectUpdateInteger (AcpiSdtProtocol, TableHandle,
+             "\\_SB.BTH0.BADR", BdAddress);
+  ASSERT_EFI_ERROR (Status);
+  DEBUG ((DEBUG_INFO, "%a: UART clock %u Hz, Bluetooth identity %a.\n",
+          __func__, Clock, (BdAddress != 0) ? "present" : "unavailable"));
+}
+
 STATIC
 VOID
 EFIAPI
@@ -750,6 +803,7 @@ InstallAcpiTables (
 
   DsdtFixupStatus (mAcpiSdtProtocol, TableHandle);
   DsdtFixupSoc (mAcpiSdtProtocol, TableHandle);
+  DsdtFixupBluetooth (mAcpiSdtProtocol, TableHandle);
   DsdtFixupMailbox (mAcpiSdtProtocol, TableHandle);
   DsdtFixupDma (mAcpiSdtProtocol, TableHandle);
   DsdtFixupSd (mAcpiSdtProtocol, TableHandle);
