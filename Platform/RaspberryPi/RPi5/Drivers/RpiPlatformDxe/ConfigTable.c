@@ -389,7 +389,7 @@ DsdtFixupMailbox (EFI_ACPI_SDT_PROTOCOL *AcpiSdtProtocol, EFI_ACPI_HANDLE TableH
   Status = gBS->LocateProtocol (&gRaspberryPiFirmwareProtocolGuid, NULL, (VOID **)&Firmware);
   if (!EFI_ERROR (Status)) {
     Status = AcpiAmlObjectUpdateInteger (AcpiSdtProtocol, TableHandle,
-               "\\_SB.MBX0.MBST", Firmware->GetMailboxHandoff ());
+               "\\_SB.SOCB.MBX0.MBST", Firmware->GetMailboxHandoff ());
   }
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "%a: Mailbox handoff unavailable: %r\n", __func__, Status));

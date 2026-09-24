@@ -177,6 +177,9 @@ Device (MMU0) {
   })
 }
 
+// The mailbox passes 32-bit VideoCore bus addresses, not CPU addresses.
+// Inherit SOCB's explicit DMA aperture so the OS DMA adapter does translation.
+Scope (SOCB) {
 Device (MBX0) {
   Name (_HID, "RPI1012")
   Name (_UID, 0)
@@ -188,6 +191,7 @@ Device (MBX0) {
     BCM2712_MMIO (0x107C013880, 0x107C0138BF, 0x40)
     Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 65 }
   })
+}
 }
 
 Device (PM00) {
@@ -374,16 +378,26 @@ Device (BTH0) {
 }
 
 // The RTC is inside the PMIC and is accessed through firmware messages.
-// It has no independent CPU MMIO resource. EFI GetTime/SetTime remain in use.
+// The native mailbox owner supplies its operation region. UEFI uses the same
+// PMIC counter before ownership transfer. No OS wake alarms are advertised.
 Device (RTC0) {
-  Name (_HID, "RPI101B")
+  Name (_HID, "ACPI000E")
+  Name (_CID, "RPI101B")
   Name (_UID, 0)
   Name (_DDN, "Raspberry Pi 5 firmware RTC")
   Name (_STA, 0x0F)
+  Name (_DEP, Package () { \_SB.SOCB.MBX0 })
+  Method (_GCP, 0, NotSerialized) { Return (4) }
+  Method (_GRT, 0, NotSerialized) {
+    Return (\_SB.SOCB.MBX0.RTIM (1, Buffer (16) {}))
+  }
+  Method (_SRT, 1, NotSerialized) {
+    Return (\_SB.SOCB.MBX0.RTIM (2, Arg0))
+  }
   Name (_DSD, Package () {
     ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
     Package () {
-      Package () { "raspberrypi,firmware", "\\_SB.MBX0" }
+      Package () { "raspberrypi,firmware", "\\_SB.SOCB.MBX0" }
     }
   })
 }
