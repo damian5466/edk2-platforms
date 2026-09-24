@@ -200,7 +200,7 @@ FADT declares a control-method power button. `PNP0C0C` uses GIO0 `_AEI`: GPIO20,
 50 ms debounce. GIO0 `_EVT(20)` sends Notify `0x80`. It requires a functioning
 GPIO event provider; this firmware does not claim unimplemented sleep wakeup.
 
-## VideoCore mailbox ownership (`MBX0`, `RPI1012`)
+## VideoCore mailbox ownership (`SOCB.MBX0`, `RPI1012`)
 
 UEFI runtime RTC services initially own this mailbox. Merely receiving MBX0's
 PnP resources does **not** grant permission to touch its hardware. Native
@@ -210,9 +210,10 @@ mailbox drivers must negotiate a one-way handoff first.
 
 | Function | Result |
 | --- | --- |
-| 0 | Buffer `{0x07}` |
+| 0 | Buffer `{0x0F}` |
 | 1 | Package `{1, native_request, firmware_active, transport_fault}` |
 | 2 | Request native ownership: integer 0 success, 1 busy/timeout, 2 transport fault, 3 handoff unavailable |
+| 3 | Package `{1, 0x80, 24, 0, 0xC0000000, 0x40000000}`: RTC-region version/space/bytes and CPU base/VideoCore base/window bytes |
 
 Arg3 is unused. A query also returns integer 3 if the handoff page is unavailable.
 Function 2 waits for an in-flight runtime transaction to finish. A timed-out
@@ -222,7 +223,29 @@ set; **there is no release operation before reboot**. Do not access registers
 until function 2 returns zero. Subsequent UEFI mailbox transactions return
 `EFI_UNSUPPORTED` without hardware access, including RTC GetTime/SetTime and
 alarm operations. The native stack must provide its RTC/firmware services
-before opting into this handoff. Current drivers never request it.
+before opting into this handoff. `Pi5Mailbox` checks function 3, prepares its
+DMA buffer, and registers the RTC operation-region handler before requesting
+ownership. A failed ownership attempt must be treated as irreversible too.
+
+The mailbox is under `SOCB` so its DMA aperture describes CPU `[0, 1 GiB)`
+at VideoCore `[0xC0000000, 4 GiB)`. Its MMIO remains CPU-physical with no
+translation. Windows 26200 returns an identity logical address for this
+non-PCI common-buffer adapter despite `_DMA`; a native owner must constrain
+the HAL allocation to the aperture and validate the mapping before applying
+the explicit VideoCore alias. Never assume an arbitrary CPU or pool address
+is usable for DMA. The original HAL address is retained for buffer release.
+
+`RTC0` is an `ACPI000E` Time and Alarm Device (`RPI101B` compatible ID), with
+an operation-region `_DEP` on `SOCB.MBX0`. `_GCP` advertises only real time,
+at one-second resolution. Wake alarms are not advertised. `_GRT` and `_SRT`
+call the same serialized `MBX0.RTIM` method. It exchanges the standard
+16-byte ACPI real-time buffer through vendor region space `0x80`, offset 0,
+length 24: command DWORD (1 get, 2 set), status DWORD (0 success,
+`0xFFFFFFFF` failure), then four time DWORDs. `_REG` gates access. The
+mailbox function driver registers this region on its own PDO, serializes
+commands with other mailbox clients, and translates PMIC UTC epoch seconds.
+Failed gets return a zeroed time buffer with Valid=0; failed sets return
+`0xFFFFFFFF`. The same PMIC source backs UEFI time before the handoff.
 
 The handoff flags reside in a dedicated runtime page with separate cache lines
 for request, active and fault. They are accessed through AML, not mapped by a

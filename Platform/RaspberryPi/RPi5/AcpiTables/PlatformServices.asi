@@ -88,7 +88,53 @@ Device (DGRF) {
   }
 }
 
-Scope (MBX0) {
+Scope (SOCB.MBX0) {
+  // Private operation-region ABI v1: command, status, ACPI real-time buffer.
+  // Only the MBX0 function driver registers space 0x80 on this PDO. RTIM's
+  // single method lock covers staging plus command for both RTC methods.
+  Name (RAVL, 0)
+  OperationRegion (RTCR, 0x80, 0, 24)
+  Field (RTCR, DWordAcc, NoLock, Preserve) {
+    RCMD, 32, RSTA, 32, RT00, 32, RT01, 32, RT02, 32, RT03, 32
+  }
+  Method (_REG, 2, NotSerialized) {
+    If (Arg0 == 0x80) { RAVL = Arg1 }
+  }
+  Method (RTIM, 2, Serialized) {
+    Local0 = Buffer (16) {}
+    If (Arg0 == 2) {
+      If (ObjectType (Arg1) != 3) { Return (0xFFFFFFFF) }
+      If (SizeOf (Arg1) != 16) { Return (0xFFFFFFFF) }
+      Local0 = Arg1
+    }
+    CreateDWordField (Local0, 0, T000)
+    CreateDWordField (Local0, 4, T001)
+    CreateDWordField (Local0, 8, T002)
+    CreateDWordField (Local0, 12, T003)
+    If (Arg0 == 1) {
+      If (RAVL == 1) {
+        RCMD = 1
+        If (RSTA == 0) {
+          T000 = RT00
+          T001 = RT01
+          T002 = RT02
+          T003 = RT03
+        }
+      }
+      Return (Local0) // Valid=0 on failure, as specified by _GRT.
+    }
+    If ((Arg0 == 2) && (RAVL == 1) && (ObjectType (Arg1) == 3)) {
+      If (SizeOf (Arg1) == 16) {
+        RT00 = T000
+        RT01 = T001
+        RT02 = T002
+        RT03 = T003
+        RCMD = 2
+        Return (RSTA)
+      }
+    }
+    Return (0xFFFFFFFF)
+  }
   Name (MBST, ACPI_PATCH_QWORD_VALUE)
   OperationRegion (HREG, SystemMemory, MBST, 132)
   Field (HREG, DWordAcc, NoLock, Preserve) {
@@ -100,7 +146,9 @@ Scope (MBX0) {
     If ((Arg0 != ToUUID ("a95b0d30-818e-4a96-a47b-726d07230502")) || (Arg1 != 1)) {
       Return (Buffer () { 0 })
     }
-    If (Arg2 == 0) { Return (Buffer () { 7 }) }
+    If (Arg2 == 0) { Return (Buffer () { 15 }) }
+    // A native owner must verify the RTC and DMA contract before function 2.
+    If (Arg2 == 3) { Return (Package () { 1, 0x80, 24, 0, 0xC0000000, 0x40000000 }) }
     If ((MBST == 0) || (MBST == ACPI_PATCH_QWORD_VALUE)) { Return (3) }
     If (Arg2 == 1) {
       Local0 = Package () { 1, 0, 0, 0 }
@@ -333,7 +381,7 @@ Device (AONI) {
   Name (_DSD, Package () {                                     \
     ToUUID ("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),            \
     Package () {                                              \
-      Package () { "raspberrypi,firmware", "\\_SB.MBX0" },              \
+      Package () { "raspberrypi,firmware", "\\_SB.SOCB.MBX0" },         \
       Package () { "raspberrypi,platform-description", "\\_SB.DGRF" }   \
     }                                                         \
   })

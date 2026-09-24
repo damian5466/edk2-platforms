@@ -53,15 +53,17 @@ DefinitionBlock ("Dsdt.aml", "DSDT", 2, "RPIFDN", "RPI5    ", 4)
       Method (_CRS, 0, Serialized) {
         //
         // Container devices with _DMA must have _CRS.
-        // Only URT0 is a child of this DMA-translating bus. Claiming the
+        // URT0 and MBX0 are children of this DMA-translating bus. Claiming the
         // entire legacy MMIO aperture here conflicts with sibling devices
         // under _SB (including RNG0/THM0) in Windows' resource arbiter.
         // Keep their CPU physical resources outside SOCB's DMA translation.
         //
         Name (RBUF, ResourceTemplate () {
           QWORDMEMORY_BUF (00, ResourceProducer)
+          QWORDMEMORY_BUF (01, ResourceProducer)
         })
         QWORD_SET (00, PL011_DEBUG_BASE_ADDRESS, PL011_DEBUG_LENGTH, 0)
+        QWORD_SET (01, 0x107C013880, 0x40, 0)
         Return (RBUF)
       }
 
