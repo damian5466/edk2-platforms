@@ -10,6 +10,8 @@
 
 #include <Base.h>
 #include "DisplayDxe.h"
+#include "DisplayEdid.h"
+#include "Bcm2712Display.h"
 
 #define MODE_800_ENABLED      BIT0
 #define MODE_640_ENABLED      BIT1
@@ -112,6 +114,120 @@ STATIC UINT32 mBootHeight;
 STATIC EFI_HANDLE mDevice;
 STATIC RASPBERRY_PI_FIRMWARE_PROTOCOL *mFwProtocol;
 STATIC EFI_CPU_ARCH_PROTOCOL *mCpu;
+STATIC BOOLEAN mWaitedForDisplay;
+STATIC BOOLEAN mNativeConsole;
+STATIC EFI_PHYSICAL_ADDRESS mConsoleBase;
+STATIC UINTN mConsoleSize;
+STATIC UINTN mConsolePitch;
+
+STATIC
+EFI_STATUS
+PrepareConsoleDisplay (
+  VOID
+  )
+{
+  EFI_STATUS          Status;
+  UINT32              Index;
+  UINT32              DisplayId;
+  UINT32              Attempt;
+  UINT32              Attempts;
+  UINT32              Block;
+  UINT32              BoardRevision;
+  UINT32              BootWidth;
+  UINT32              BootHeight;
+  UINT8               Edid[128];
+  UINT8               Extension[128];
+  BOOLEAN             Hdmi;
+  RPI_DISPLAY_TIMING  Timing;
+
+  mBootWidth = 0;
+  mBootHeight = 0;
+  Status = mFwProtocol->GetFBSize (&mBootWidth, &mBootHeight);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  // A USB-powered monitor can still be starting when the bootloader probes
+  // HDMI. Retry enumeration for a bounded time only when it supplied no mode.
+  Attempts = (!mWaitedForDisplay && ((mBootWidth == 0) || (mBootHeight == 0))) ? 4 : 1;
+  mWaitedForDisplay = TRUE;
+  for (Attempt = 0; Attempt < Attempts; Attempt++) {
+    for (Index = 0; Index < 2; Index++) {
+      Status = mFwProtocol->GetDisplayId (Index, &DisplayId);
+      if (EFI_ERROR (Status) || ((DisplayId != 2) && (DisplayId != 7))) {
+        continue;
+      }
+
+      Status = mFwProtocol->GetDisplayEdid (DisplayId, 0, Edid);
+      if (EFI_ERROR (Status) || !DisplayEdidPreferredTiming (Edid, &Timing)) {
+        DEBUG ((DEBUG_INFO, "Display index %u ID %u: no usable EDID timing (%r)\n",
+          Index, DisplayId, Status));
+        continue;
+      }
+
+      Hdmi = FALSE;
+      for (Block = 1; (Block <= Edid[126]) && (Block <= 4); Block++) {
+        Status = mFwProtocol->GetDisplayEdid (DisplayId, Block, Extension);
+        if (!EFI_ERROR (Status) && DisplayEdidIsHdmi (Extension)) {
+          Hdmi = TRUE;
+          break;
+        }
+      }
+
+      Timing.Display = (UINT8)DisplayId;
+      if (!Hdmi) {
+        Timing.Flags |= BIT9;
+      }
+
+      Status = mFwProtocol->SelectDisplay (Index);
+      if (!EFI_ERROR (Status)) {
+        Status = mFwProtocol->GetFBSize (&BootWidth, &BootHeight);
+      }
+      if (!EFI_ERROR (Status) && BootWidth && BootHeight) {
+        mBootWidth = BootWidth;
+        mBootHeight = BootHeight;
+        Status = mFwProtocol->GetFB (BootWidth, BootHeight, 32,
+                   &mConsoleBase, &mConsoleSize, &mConsolePitch);
+        if (!EFI_ERROR (Status)) {
+          Status = mFwProtocol->GetModelRevision (&BoardRevision);
+        }
+        if (!EFI_ERROR (Status)) {
+          Status = Bcm2712DisplaySetMode (BoardRevision,
+                     &Timing, mConsoleBase, mConsoleSize, mConsolePitch);
+        }
+        DEBUG ((DEBUG_INFO,
+          "Display EDID index %u ID %u: %ux%u clock %u kHz totals %ux%u HDMI %u: %r\n",
+          Index, DisplayId, Timing.HDisplay, Timing.VDisplay, Timing.Clock,
+          Timing.HTotal, Timing.VTotal, Hdmi, Status));
+        if (!EFI_ERROR (Status)) {
+          mNativeConsole = TRUE;
+          mBootWidth = Timing.HDisplay;
+          mBootHeight = Timing.VDisplay;
+          return EFI_SUCCESS;
+        }
+        if (Status == EFI_DEVICE_ERROR) {
+          return Status;
+        }
+      }
+
+    }
+
+    if (Attempt + 1 < Attempts) {
+      gBS->Stall (1000000);
+    }
+  }
+
+  // Old firmware or EDIDs without a supported DTD retain the bootloader mode.
+  // Never publish a fabricated 640x480 GOP for a nonexistent 0x0 framebuffer.
+  if ((mBootWidth == 0) || (mBootHeight == 0)) {
+    DEBUG ((DEBUG_WARN, "Display: no connected firmware framebuffer yet\n"));
+    return EFI_NOT_READY;
+  }
+
+  DEBUG ((DEBUG_INFO, "Display: retaining bootloader mode %ux%u\n",
+    mBootWidth, mBootHeight));
+  return EFI_SUCCESS;
+}
 
 STATIC GOP_MODE_DATA mGopModeTemplate[] = {
   { 800,  600,  0 }, /* Legacy */
@@ -241,9 +357,16 @@ DisplaySetMode (
 
   DEBUG ((DEBUG_INFO, "Setting mode %u from %u: %u x %u\n",
     ModeNumber, This->Mode->Mode, Mode->Width, Mode->Height));
+  if (mNativeConsole) {
+    FbBase = mConsoleBase;
+    FbSize = mConsoleSize;
+    FbPitch = mConsolePitch;
+    Status = EFI_SUCCESS;
+  } else {
   Status = mFwProtocol->GetFB (Mode->Width, Mode->Height,
                           PI3_BITS_PER_PIXEL, &FbBase,
                           &FbSize, &FbPitch);
+  }
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "Could not set mode %u\n", ModeNumber));
     return EFI_DEVICE_ERROR;
@@ -413,15 +536,6 @@ DisplayDxeInitialize (
     return Status;
   }
 
-  // Query the current display resolution from mailbox
-  Status = mFwProtocol->GetFBSize (&mBootWidth, &mBootHeight);
-  if (EFI_ERROR (Status)) {
-    return Status;
-  }
-
-  DEBUG ((DEBUG_INFO, "Display boot mode is %u x %u\n",
-    mBootWidth, mBootHeight));
-
   Status = gBS->InstallMultipleProtocolInterfaces (
     &mDevice, &gEfiDevicePathProtocolGuid,
     &mDisplayProtoDevicePath, &gEfiCallerIdGuid,
@@ -484,6 +598,14 @@ DriverStart (
   EFI_STATUS Status;
   VOID *Dummy;
 
+  Status = PrepareConsoleDisplay ();
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  DEBUG ((DEBUG_INFO, "Display boot mode is %u x %u\n",
+    mBootWidth, mBootHeight));
+
   Status = gBS->OpenProtocol (
                   Controller,
                   &gEfiCallerIdGuid,
@@ -517,6 +639,11 @@ DriverStart (
     ASSERT_EFI_ERROR (Status);
   }
 
+  if (mNativeConsole) {
+    Status = PcdSet8S (PcdDisplayEnableScaledVModes, JUST_NATIVE_ENABLED);
+    ASSERT_EFI_ERROR (Status);
+  }
+
   mLastMode = 0;
   for  (TempIndex = 0, Index = 0;
         TempIndex < ARRAY_SIZE (mGopModeTemplate); TempIndex++) {
@@ -532,7 +659,8 @@ DriverStart (
     }
   }
 
-  if (PcdGet8 (PcdDisplayEnableScaledVModes) == JUST_NATIVE_ENABLED) {
+  if (!mNativeConsole &&
+      (PcdGet8 (PcdDisplayEnableScaledVModes) == JUST_NATIVE_ENABLED)) {
     /*
      * mBootWidth x mBootHeight may not be sensible,
      * so clean it up, since we won't be adding
@@ -563,9 +691,16 @@ DriverStart (
 
     GOP_MODE_DATA *Mode = &mGopModeData[Index];
 
-    Status = mFwProtocol->GetFB (Mode->Width, Mode->Height,
-                            PI3_BITS_PER_PIXEL, &FbBase,
-                            &FbSize, &FbPitch);
+    if (mNativeConsole) {
+      FbBase = mConsoleBase;
+      FbSize = mConsoleSize;
+      FbPitch = mConsolePitch;
+      Status = EFI_SUCCESS;
+    } else {
+      Status = mFwProtocol->GetFB (Mode->Width, Mode->Height,
+                              PI3_BITS_PER_PIXEL, &FbBase,
+                              &FbSize, &FbPitch);
+    }
     if (EFI_ERROR (Status)) {
       goto Done;
     }

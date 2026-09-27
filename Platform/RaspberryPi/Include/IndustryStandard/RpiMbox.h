@@ -82,6 +82,7 @@
 #define RPI_MBOX_SET_ENABLE_QPU                               0x00030012
 #define RPI_MBOX_GET_DISPMANX_RESOURCE_MEM_HANDLE             0x00030014
 #define RPI_MBOX_GET_EDID_BLOCK                               0x00030020
+#define RPI_MBOX_GET_EDID_BLOCK_DISPLAY                       0x00030023
 #define RPI_MBOX_GET_CUSTOMER_OTP                             0x00030021
 #define RPI_MBOX_GET_DOMAIN_STATE                             0x00030030
 #define RPI_MBOX_GET_GPIO_STATE                               0x00030041
@@ -120,6 +121,9 @@
 #define RPI_MBOX_GET_FB_PALETTE                               0x0004000b
 #define RPI_MBOX_GET_FB_TOUCHBUF                              0x0004000f
 #define RPI_MBOX_GET_FB_GPIOVIRTBUF                           0x00040010
+#define RPI_MBOX_GET_NUM_DISPLAYS                             0x00040013
+#define RPI_MBOX_GET_DISPLAY_ID                               0x00040016
+#define RPI_MBOX_SET_DISPLAY_NUM                              0x00048013
 
 #define RPI_MBOX_TEST_FB_PHYSICAL_WIDTH_HEIGHT                0x00044003
 #define RPI_MBOX_TEST_FB_VIRTUAL_WIDTH_HEIGHT                 0x00044004
