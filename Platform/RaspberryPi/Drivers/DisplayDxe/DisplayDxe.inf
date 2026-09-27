@@ -28,6 +28,10 @@
 [Sources]
   DisplayDxe.h
   DisplayDxe.c
+  Bcm2712Display.c
+  Bcm2712Display.h
+  DisplayEdid.c
+  DisplayEdid.h
   Screenshot.c
   ComponentName.c
 

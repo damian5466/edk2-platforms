@@ -1620,6 +1620,147 @@ RpiFirmwareGetMailboxHandoff (VOID)
   return mMailboxHandoffPhysical;
 }
 
+// These calls are used before ExitBootServices, while VideoCore still owns
+// the display pipeline. Native OS drivers must not change firmware timings.
+STATIC
+EFI_STATUS
+RpiFirmwareDisplayProperty (
+  IN UINT32      Tag,
+  IN OUT VOID    *Value,
+  IN UINT32      Size,
+  IN UINT32      RequestSize
+  )
+{
+  RPI_FW_BUFFER_HEAD  *Head;
+  RPI_FW_TAG_HEAD     *TagHead;
+  VOID               *Payload;
+  EFI_STATUS         Status;
+  UINT32             Result;
+  UINT32             Length;
+
+  if (EfiAtRuntime ()) {
+    return EFI_UNSUPPORTED;
+  }
+
+  if (!AcquireSpinLockOrFail (&mMailboxLock)) {
+    return EFI_NOT_READY;
+  }
+
+  Head = mDmaBuffer;
+  Length = sizeof (*Head) + sizeof (*TagHead) + Size + sizeof (UINT32);
+  ZeroMem (Head, Length);
+  Head->BufferSize = Length;
+  TagHead = (RPI_FW_TAG_HEAD *)(Head + 1);
+  TagHead->TagId = Tag;
+  TagHead->TagSize = Size;
+  TagHead->TagValueSize = RequestSize;
+  Payload = TagHead + 1;
+  CopyMem (Payload, Value, Size);
+  Status = MailboxTransaction (Length, RPI_MBOX_VC_CHANNEL, &Result);
+  if (!EFI_ERROR (Status)) {
+    if ((Head->Response != RPI_MBOX_RESP_SUCCESS) ||
+        (TagHead->TagId != Tag) || (TagHead->TagSize != Size) ||
+        (TagHead->TagValueSize != (RPI_MBOX_VALUE_SIZE_RESPONSE_MASK | Size))) {
+      DEBUG ((DEBUG_ERROR, "Display property %x: response %x length %x\n",
+        Tag, Head->Response, TagHead->TagValueSize));
+      Status = EFI_DEVICE_ERROR;
+    } else {
+      CopyMem (Value, Payload, Size);
+    }
+  }
+
+  ReleaseSpinLock (&mMailboxLock);
+  return Status;
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+RpiFirmwareGetDisplayId (
+  IN UINT32   Index,
+  OUT UINT32  *DisplayId
+  )
+{
+  EFI_STATUS  Status;
+  UINT32      Count;
+  UINT32      Id;
+
+  if (DisplayId == NULL) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  Count = 0;
+  Status = RpiFirmwareDisplayProperty (RPI_MBOX_GET_NUM_DISPLAYS,
+             &Count, sizeof (Count), 0);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  if (Index >= Count) {
+    return EFI_NOT_FOUND;
+  }
+
+  Id = Index;
+  Status = RpiFirmwareDisplayProperty (RPI_MBOX_GET_DISPLAY_ID,
+             &Id, sizeof (Id), sizeof (Id));
+  if (!EFI_ERROR (Status)) {
+    *DisplayId = Id;
+  }
+
+  return Status;
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+RpiFirmwareGetDisplayEdid (
+  IN UINT32  DisplayId,
+  IN UINT32  Block,
+  OUT UINT8  Edid[128]
+  )
+{
+  struct {
+    UINT32  Block;
+    UINT32  DisplayId;
+    UINT8   Edid[128];
+  } Value;
+  EFI_STATUS  Status;
+
+  if ((Edid == NULL) || (Block > 255)) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  ZeroMem (&Value, sizeof (Value));
+  Value.Block = Block;
+  Value.DisplayId = DisplayId;
+  Status = RpiFirmwareDisplayProperty (RPI_MBOX_GET_EDID_BLOCK_DISPLAY,
+             &Value, sizeof (Value), 2 * sizeof (UINT32));
+  if (!EFI_ERROR (Status)) {
+    CopyMem (Edid, Value.Edid, sizeof (Value.Edid));
+  }
+
+  return Status;
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+RpiFirmwareSelectDisplay (
+  IN UINT32  Index
+  )
+{
+  EFI_STATUS  Status;
+  UINT32      Id;
+
+  Status = RpiFirmwareGetDisplayId (Index, &Id);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  return RpiFirmwareDisplayProperty (RPI_MBOX_SET_DISPLAY_NUM,
+           &Index, sizeof (Index), sizeof (Index));
+}
+
 STATIC RASPBERRY_PI_FIRMWARE_PROTOCOL mRpiFirmwareProtocol = {
   RpiFirmwareSetPowerState,
   RpiFirmwareGetMacAddress,
@@ -1645,6 +1786,9 @@ STATIC RASPBERRY_PI_FIRMWARE_PROTOCOL mRpiFirmwareProtocol = {
   RpiFirmwareSetRtc,
   RpiFirmwareGetEepromUpdateStatus,
   RpiFirmwareGetMailboxHandoff,
+  RpiFirmwareGetDisplayId,
+  RpiFirmwareGetDisplayEdid,
+  RpiFirmwareSelectDisplay,
 };
 
 STATIC

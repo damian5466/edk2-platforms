@@ -167,6 +167,27 @@ EFI_STATUS
   IN   UINT32                     Value
   );
 
+// Progressive display timing; pixel clock is in kHz.
+typedef struct {
+  UINT8   Display;
+  UINT8   Reserved;
+  UINT16  VideoIdCode;
+  UINT32  Clock;
+  UINT16  HDisplay;
+  UINT16  HSyncStart;
+  UINT16  HSyncEnd;
+  UINT16  HTotal;
+  UINT16  HSkew;
+  UINT16  VDisplay;
+  UINT16  VSyncStart;
+  UINT16  VSyncEnd;
+  UINT16  VTotal;
+  UINT16  VScan;
+  UINT16  VRefresh;
+  UINT16  Reserved2;
+  UINT32  Flags;
+} RPI_DISPLAY_TIMING;
+
 typedef struct {
   SET_POWER_STATE        SetPowerState;
   GET_MAC_ADDRESS        GetMacAddress;
@@ -194,6 +215,11 @@ typedef struct {
   EFI_STATUS (EFIAPI *GetEepromUpdateStatus) (OUT UINT32 Words[4]);
   // Boot-time only: physical address of RPI_MAILBOX_HANDOFF runtime page.
   EFI_PHYSICAL_ADDRESS (EFIAPI *GetMailboxHandoff) (VOID);
+  // Boot-time display enumeration uses an index; EDID/timing use physical IDs.
+  EFI_STATUS (EFIAPI *GetDisplayId) (IN UINT32 Index, OUT UINT32 *DisplayId);
+  EFI_STATUS (EFIAPI *GetDisplayEdid) (IN UINT32 DisplayId, IN UINT32 Block,
+                                     OUT UINT8 Edid[128]);
+  EFI_STATUS (EFIAPI *SelectDisplay) (IN UINT32 Index);
 } RASPBERRY_PI_FIRMWARE_PROTOCOL;
 
 extern EFI_GUID gRaspberryPiFirmwareProtocolGuid;
